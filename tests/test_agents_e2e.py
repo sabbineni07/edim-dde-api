@@ -1,22 +1,54 @@
-"""API tests: domain bootstrap + invoke (no local agent copies)."""
+"""API tests: domain bootstrap + invoke with test LLM (no Foundry)."""
 
 from __future__ import annotations
 
-from edim_dde_ai import create_agent
-from edim_dde_domain import bootstrap_agents
+import sys
+from pathlib import Path
+
+import pytest
+from edim_dde_ai import create_agent, set_llm_provider
+from edim_dde_ai.content.registry import clear_llm_provider
+from edim_dde_domain import bootstrap_agents, reset_bootstrap
+from edim_dde_domain.sources import clear_sources
+
+# Reuse domain test stub (mocks stay in tests/, not production packages).
+_DOMAIN_TESTS = Path(__file__).resolve().parents[2] / "edim-dde-domain" / "tests"
+if _DOMAIN_TESTS.is_dir() and str(_DOMAIN_TESTS) not in sys.path:
+    sys.path.insert(0, str(_DOMAIN_TESTS))
+
+from llm_stub import DomainStubLLM  # noqa: E402
 
 
-def setup_module() -> None:
+@pytest.fixture(autouse=True)
+def _agents_with_stub_llm():
+    clear_sources()
+    reset_bootstrap()
+    set_llm_provider(DomainStubLLM())
     bootstrap_agents()
+    yield
+    reset_bootstrap()
+    clear_llm_provider()
+    clear_sources()
 
 
-def test_spark_rca_oom():
+def test_spark_rca_with_evidence_override():
     agent = create_agent("spark_rca")
     out = agent.invoke(
         {
             "job_run_id": "jr-1",
             "job_id": "j-1",
-            "error_text": "Executor OutOfMemoryError: Java heap space",
+            "evidence_pack": {
+                "job_run_id": "jr-1",
+                "evidence": [
+                    {
+                        "ref": "e1",
+                        "excerpt": "Executor OutOfMemoryError: Java heap space",
+                    }
+                ],
+                "raw_anchors": {
+                    "failure_reason": "Executor OutOfMemoryError: Java heap space"
+                },
+            },
         }
     )
     assert out["result"]["root_cause"]["category"] == "resource"
