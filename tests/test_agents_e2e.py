@@ -64,8 +64,13 @@ def test_cluster_tuning_with_explanation():
             "metrics": {
                 "azure_worker_vm_size": "Standard_E8s_v3",
                 "max_worker_nodes_provisioned": 16,
+                "avg_worker_nodes_consumed": 4.0,
+                "p99_worker_nodes_consumed": 5.0,
                 "peak_worker_cpu_utilization_pct": 20,
                 "peak_worker_memory_utilization_pct": 25,
+                "avg_worker_cpu_utilization_pct": 15,
+                "avg_worker_memory_utilization_pct": 18,
+                "driver_node_count": 1,
             },
         }
     )

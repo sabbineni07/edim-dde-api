@@ -44,7 +44,12 @@ def recommend_cluster(body: TuningRequest) -> dict[str, Any]:
         "cluster_id": final.get("cluster_id"),
         "job_run_id": final.get("job_run_id"),
         "recommendation": final.get("recommendation") or {},
+        "current_configuration": final.get("current_configuration") or {},
+        "comparison": final.get("comparison") or {},
         "risk_assessment": final.get("risk_assessment") or {},
         "pattern_analysis": final.get("pattern_analysis") or "",
+        "reason_codes": final.get("reason_codes") or [],
+        "guardrail_adjustments": final.get("guardrail_adjustments") or [],
+        "job_cluster_metrics": final.get("metrics") or {},
         "explanation": final.get("explanation") or "",
     }
