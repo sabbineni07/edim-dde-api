@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 from edim_dde_ai import create_agent, set_llm_provider
 from edim_dde_ai.content.registry import clear_llm_provider
 from edim_dde_domain import bootstrap_agents, reset_bootstrap
 from edim_dde_domain.sources import clear_sources
-
-# Reuse domain test stub (mocks stay in tests/, not production packages).
-_DOMAIN_TESTS = Path(__file__).resolve().parents[2] / "edim-dde-domain" / "tests"
-if _DOMAIN_TESTS.is_dir() and str(_DOMAIN_TESTS) not in sys.path:
-    sys.path.insert(0, str(_DOMAIN_TESTS))
-
-from llm_stub import DomainStubLLM  # noqa: E402
+from edim_dde_domain.testing import DomainStubLLM
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +21,17 @@ def _agents_with_stub_llm():
     reset_bootstrap()
     clear_llm_provider()
     clear_sources()
+
+
+@pytest.fixture
+def client(_agents_with_stub_llm):
+    # Import after agents are registered. Lifespan may replace the LLM provider
+    # with LazyFoundry — restore the stub for offline HTTP tests.
+    from edim_dde_api.main import app
+
+    with TestClient(app) as test_client:
+        set_llm_provider(DomainStubLLM())
+        yield test_client
 
 
 def test_spark_rca_with_evidence_override():
@@ -76,3 +79,74 @@ def test_cluster_tuning_with_explanation():
     )
     assert out["recommendation"]["recommended_max_workers"] < 16
     assert out["explanation"]
+    assert "resource_optimization_pct" in out["recommendation"]
+    assert "cost" not in (out.get("comparison") or {})
+
+
+def test_health_http(client: TestClient):
+    res = client.get("/health")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert "cluster_tuning" in body["agents"]
+    assert "spark_rca" in body["agents"]
+
+
+def test_recommendations_v1_http(client: TestClient):
+    res = client.post(
+        "/api/v1/recommendations",
+        json={
+            "job_id": "j-1",
+            "cluster_id": "c-1",
+            "include_explanation": False,
+            "metrics": {
+                "azure_worker_vm_size": "Standard_E8s_v3",
+                "max_worker_nodes_provisioned": 16,
+                "avg_worker_nodes_consumed": 4.0,
+                "p99_worker_nodes_consumed": 5.0,
+                "peak_worker_cpu_utilization_pct": 20,
+                "peak_worker_memory_utilization_pct": 25,
+                "avg_worker_cpu_utilization_pct": 15,
+                "avg_worker_memory_utilization_pct": 18,
+                "driver_node_count": 1,
+            },
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["job_id"] == "j-1"
+    assert body["recommendation"]["recommended_max_workers"] < 16
+    assert "resource_optimization" in body["comparison"]
+    assert "cost" not in body["comparison"]
+    # Unversioned path removed
+    assert client.post("/api/recommendations", json={"job_id": "j", "cluster_id": "c"}).status_code == 404
+
+
+def test_rca_analyze_v1_http(client: TestClient):
+    res = client.post(
+        "/api/v1/rca/analyze",
+        json={
+            "job_run_id": "jr-1",
+            "job_id": "j-1",
+            "evidence_pack": {
+                "job_run_id": "jr-1",
+                "evidence": [
+                    {
+                        "ref": "e1",
+                        "excerpt": "Executor OutOfMemoryError: Java heap space",
+                    }
+                ],
+                "raw_anchors": {
+                    "failure_reason": "Executor OutOfMemoryError: Java heap space"
+                },
+            },
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "completed"
+    assert body["root_cause"]["category"] == "resource"
+    assert "recommended_actions" in body
+    # Must not leak full agent state keys
+    assert "sizing_raw" not in body
+    assert "llm_raw" not in body

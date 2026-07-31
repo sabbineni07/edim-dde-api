@@ -9,7 +9,7 @@ Client → edim-dde-api (HTTP)
               │  CORS + DatabricksUserTokenMiddleware
               │  lifespan: bootstrap_agents + Foundry LLM provider
               ▼
-         edim-dde-ai create_agent(...).invoke(...)
+         edim-dde-ai create_agent(...).invoke(...)  (via asyncio.to_thread)
 ```
 
 ## Layout
@@ -18,8 +18,8 @@ Client → edim-dde-api (HTTP)
 src/edim_dde_api/
   main.py         # lifespan, CORS, LLM, exception handlers
   middleware.py   # Apps user OAuth → ContextVar
-  routes.py       # /health, /api/rca/analyze, /api/recommendations
-  schemas.py
+  routes.py       # /health, /api/v1/rca/analyze, /api/v1/recommendations
+  schemas.py      # request + response Pydantic models (OpenAPI)
 ```
 
 ## Setup
@@ -51,10 +51,18 @@ uvicorn edim_dde_api.main:app --reload --port 8080
 ```
 
 ```bash
-curl -s http://127.0.0.1:8080/api/recommendations \
+curl -s http://127.0.0.1:8080/api/v1/recommendations \
   -H 'content-type: application/json' \
   -d '{"job_id":"123","cluster_id":"456","include_explanation":false}'
 ```
+
+Versioned API surface:
+
+| Method | Path | Response model |
+|--------|------|----------------|
+| GET | `/health` | status + agents |
+| POST | `/api/v1/rca/analyze` | `RcaResponse` |
+| POST | `/api/v1/recommendations` | `TuningResponse` |
 
 On Databricks Apps, the gateway forwards `X-Forwarded-Access-Token`; middleware binds
 it for SQL. `Authorization: Bearer` is not used as a Databricks token.

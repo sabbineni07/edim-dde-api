@@ -1,4 +1,4 @@
-"""Pydantic request/response models."""
+"""Pydantic request/response models (OpenAPI contract for /api/v1)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,24 @@ class RcaRequest(BaseModel):
         description="Optional failure text for classification when provided with evidence",
         examples=["Executor OutOfMemoryError: Java heap space"],
     )
+    evidence_pack: Optional[dict[str, Any]] = None
+
+
+class RootCause(BaseModel):
+    category: str
+    summary: str
+    confidence: float
+
+
+class RcaResponse(BaseModel):
+    """Stable HTTP shape for Spark RCA (not the full agent state bag)."""
+
+    job_id: Optional[str] = None
+    job_run_id: Optional[str] = None
+    status: str = "completed"
+    root_cause: RootCause
+    recommended_actions: list[str] = Field(default_factory=list)
+    classification_hint: dict[str, Any] = Field(default_factory=dict)
     evidence_pack: Optional[dict[str, Any]] = None
 
 
@@ -46,4 +64,47 @@ class TuningRequest(BaseModel):
                 "avg_worker_memory_utilization_pct": 22,
             }
         ],
+    )
+
+
+class TuningResponse(BaseModel):
+    """Stable HTTP shape for cluster tuning (projected from agent state)."""
+
+    job_id: Optional[str] = None
+    cluster_id: Optional[str] = None
+    job_run_id: Optional[str] = None
+    recommendation: dict[str, Any] = Field(default_factory=dict)
+    current_configuration: dict[str, Any] = Field(default_factory=dict)
+    comparison: dict[str, Any] = Field(default_factory=dict)
+    risk_assessment: dict[str, Any] = Field(default_factory=dict)
+    pattern_analysis: str = ""
+    reason_codes: list[str] = Field(default_factory=list)
+    guardrail_adjustments: list[Any] = Field(default_factory=list)
+    job_cluster_metrics: dict[str, Any] = Field(default_factory=dict)
+    explanation: str = ""
+
+
+def rca_response_from_agent_state(final: dict[str, Any]) -> RcaResponse:
+    """Map agent state → RcaResponse; require ``result`` (no full-state fallback)."""
+    result = final.get("result")
+    if not isinstance(result, dict):
+        raise ValueError("spark_rca agent state missing result object")
+    return RcaResponse.model_validate(result)
+
+
+def tuning_response_from_agent_state(final: dict[str, Any]) -> TuningResponse:
+    """Map agent state → TuningResponse (explicit field projection)."""
+    return TuningResponse(
+        job_id=final.get("job_id"),
+        cluster_id=final.get("cluster_id"),
+        job_run_id=final.get("job_run_id"),
+        recommendation=final.get("recommendation") or {},
+        current_configuration=final.get("current_configuration") or {},
+        comparison=final.get("comparison") or {},
+        risk_assessment=final.get("risk_assessment") or {},
+        pattern_analysis=str(final.get("pattern_analysis") or ""),
+        reason_codes=list(final.get("reason_codes") or []),
+        guardrail_adjustments=list(final.get("guardrail_adjustments") or []),
+        job_cluster_metrics=final.get("metrics") or {},
+        explanation=str(final.get("explanation") or ""),
     )

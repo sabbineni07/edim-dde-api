@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from edim_dde_api import __version__
 from edim_dde_api.middleware import DatabricksUserTokenMiddleware
-from edim_dde_api.routes import router
+from edim_dde_api.routes import api_v1, router
 
 
 def _cors_origins() -> list[str]:
@@ -73,6 +73,7 @@ app.add_middleware(
 )
 app.add_middleware(DatabricksUserTokenMiddleware)
 app.include_router(router)
+app.include_router(api_v1)
 
 
 @app.exception_handler(FoundryLLMNotConfiguredError)
