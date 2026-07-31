@@ -33,6 +33,16 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
+## CORS
+
+Browser origins are an explicit allow-list (no `*` + credentials):
+
+```bash
+export EDIM_CORS_ORIGINS=https://my-app.example,http://localhost:4200
+```
+
+Unset / empty → no cross-origin browser access (fine for curl / same-origin).
+
 ## Run
 
 ```bash
@@ -46,4 +56,5 @@ curl -s http://127.0.0.1:8080/api/recommendations \
   -d '{"job_id":"123","cluster_id":"456","include_explanation":false}'
 ```
 
-On Databricks Apps, the gateway forwards `X-Forwarded-Access-Token`; middleware binds it for SQL.
+On Databricks Apps, the gateway forwards `X-Forwarded-Access-Token`; middleware binds
+it for SQL. `Authorization: Bearer` is not used as a Databricks token.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from edim_dde_ai import set_llm_provider
@@ -18,6 +19,19 @@ from fastapi.responses import JSONResponse
 from edim_dde_api import __version__
 from edim_dde_api.middleware import DatabricksUserTokenMiddleware
 from edim_dde_api.routes import router
+
+
+def _cors_origins() -> list[str]:
+    """Explicit browser origins from ``EDIM_CORS_ORIGINS`` (comma-separated).
+
+    Empty (default) disables cross-origin browser access. Never combine
+    ``allow_origins=["*"]`` with credentials — Starlette would reflect any
+    request Origin.
+    """
+    raw = os.environ.get("EDIM_CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 @asynccontextmanager
@@ -49,10 +63,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_origins = _cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials=bool(_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
