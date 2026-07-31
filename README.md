@@ -4,6 +4,8 @@ Thin **FastAPI** app. Agents and tools live in
 [`edim-dde-domain`](../edim-dde-domain); graphs run via
 [`edim-dde-ai`](../edim-dde-ai).
 
+**Docs:** [Stack engineer guide](../edim-dde-domain/docs/README.md) · [Endpoints](../edim-dde-domain/docs/api/endpoints.md) · [Configuration](../edim-dde-domain/docs/api/configuration.md)
+
 ```text
 Client → edim-dde-api (HTTP)
               │  CORS + DatabricksUserTokenMiddleware
