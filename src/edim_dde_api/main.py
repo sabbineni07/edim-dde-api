@@ -36,6 +36,18 @@ def _cors_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # BL-013: load Key Vault secrets into env (no overwrite of existing values).
+    try:
+        from edim_dde_domain.security import load_key_vault_secrets
+
+        load_key_vault_secrets()
+    except Exception as exc:  # noqa: BLE001 — startup should still allow /health
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Key Vault bootstrap skipped/failed: %s", exc
+        )
+
     bootstrap_agents()
 
     class _LazyFoundry:

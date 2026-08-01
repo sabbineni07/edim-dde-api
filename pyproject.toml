@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edim-dde-api"
-version = "0.1.0"
+version = "1.0.0"
 description = "Thin FastAPI over edim-dde-domain YAML agents"
 readme = "README.md"
 requires-python = ">=3.10"
