@@ -8,6 +8,7 @@ from typing import Any
 
 from edim_dde_ai import create_agent, list_agents
 from edim_dde_ai.observability import build_run_config, get_observability_provider
+from edim_dde_ai.store import get_state_store
 from edim_dde_domain.errors import DatabricksNotConfiguredError, NoJobMetricsError
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -37,11 +38,13 @@ def _request_id(
 @router.get("/health")
 def health() -> dict[str, Any]:
     obs = get_observability_provider()
+    store = get_state_store()
     return {
         "status": "ok",
         "agents": list_agents(),
         "version": __version__,
         "observability": getattr(obs, "name", "unknown"),
+        "state_store": getattr(store, "name", "unknown"),
     }
 
 
