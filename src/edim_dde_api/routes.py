@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from edim_dde_ai import create_agent, list_agents
-from edim_dde_ai.observability import build_run_config
+from edim_dde_ai.observability import build_run_config, get_observability_provider
 from edim_dde_domain.errors import DatabricksNotConfiguredError, NoJobMetricsError
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -36,7 +36,13 @@ def _request_id(
 
 @router.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "agents": list_agents(), "version": __version__}
+    obs = get_observability_provider()
+    return {
+        "status": "ok",
+        "agents": list_agents(),
+        "version": __version__,
+        "observability": getattr(obs, "name", "unknown"),
+    }
 
 
 @api_v1.post("/rca/analyze", response_model=RcaResponse)

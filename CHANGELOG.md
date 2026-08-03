@@ -5,7 +5,8 @@
 ### Added
 - Key Vault bootstrap on API lifespan
 - LangSmith-oriented `request_id` / run config on agent invokes
-- `/health` includes package `version`
+- `configure_observability_from_env()` on lifespan (`EDIM_OBSERVABILITY`)
+- `/health` includes package `version` and active `observability` backend
 
 ### Notes
 - R1 version alignment with domain + ai. Internal index publish is ops-owned.

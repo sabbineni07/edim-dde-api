@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from edim_dde_ai import set_llm_provider
+from edim_dde_ai import set_llm_provider, configure_observability_from_env
 from edim_dde_ai.errors import ChainInvokerError
+from edim_dde_ai.observability import get_observability_provider
 from edim_dde_domain import (
     FoundryLLMNotConfiguredError,
     bootstrap_agents,
@@ -46,6 +47,16 @@ async def lifespan(_app: FastAPI):
 
         logging.getLogger(__name__).warning(
             "Key Vault bootstrap skipped/failed: %s", exc
+        )
+
+    # Pluggable observability: EDIM_OBSERVABILITY=none|langsmith|mlflow|auto
+    try:
+        configure_observability_from_env()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Observability configure failed (%s); continuing with no-op", exc
         )
 
     bootstrap_agents()
