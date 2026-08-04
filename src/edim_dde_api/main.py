@@ -7,13 +7,12 @@ from contextlib import asynccontextmanager
 
 from edim_dde_ai import (
     configure_observability_from_env,
+    configure_retrieval_from_env,
     configure_state_store_from_env,
     set_llm_provider,
     sync_registered_agents_to_store,
 )
 from edim_dde_ai.errors import ChainInvokerError
-from edim_dde_ai.observability import get_observability_provider
-from edim_dde_ai.store import get_state_store
 from edim_dde_domain import (
     FoundryLLMNotConfiguredError,
     bootstrap_agents,
@@ -73,6 +72,16 @@ async def lifespan(_app: FastAPI):
 
         logging.getLogger(__name__).warning(
             "State store configure failed (%s); continuing with memory", exc
+        )
+
+    # Retrieval plane: EDIM_RETRIEVAL=none|memory|faiss|azure_ai_search|databricks_vector
+    try:
+        configure_retrieval_from_env()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Retrieval configure failed (%s); continuing with none", exc
         )
 
     bootstrap_agents()

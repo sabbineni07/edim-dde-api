@@ -39,6 +39,34 @@ class RcaResponse(BaseModel):
     evidence_pack: Optional[dict[str, Any]] = None
 
 
+class KnowledgeIngestRequest(BaseModel):
+    """Curated knowledge upsert (Acceptance-gated). Bulk ingest stays in Jobs."""
+
+    corpus: str = Field(..., examples=["spark-runbooks"])
+    doc_id: str = Field(..., examples=["oom-playbook-v2"])
+    text: str = Field(
+        "",
+        description="Full document/chunk body to index",
+    )
+    summary: Optional[str] = Field(
+        None,
+        description="User-provided summary prepended to text for better retrieval",
+    )
+    accepted: bool = Field(
+        False,
+        description="Must be true — Acceptance gate before indexing",
+    )
+    source: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeIngestResponse(BaseModel):
+    status: str
+    corpus: str
+    doc_id: str
+    retrieval: str
+
+
 class TuningRequest(BaseModel):
     job_id: str = Field(..., examples=["job-42"])
     cluster_id: str = Field(..., examples=["cluster-abc"])

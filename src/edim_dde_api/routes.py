@@ -8,12 +8,15 @@ from typing import Any
 
 from edim_dde_ai import create_agent, list_agents
 from edim_dde_ai.observability import build_run_config, get_observability_provider
+from edim_dde_ai.retrieval import get_retrieval_provider, provider_for_corpus
 from edim_dde_ai.store import get_state_store
 from edim_dde_domain.errors import DatabricksNotConfiguredError, NoJobMetricsError
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from edim_dde_api import __version__
 from edim_dde_api.schemas import (
+    KnowledgeIngestRequest,
+    KnowledgeIngestResponse,
     RcaRequest,
     RcaResponse,
     TuningRequest,
@@ -39,13 +42,56 @@ def _request_id(
 def health() -> dict[str, Any]:
     obs = get_observability_provider()
     store = get_state_store()
+    retrieval = get_retrieval_provider()
     return {
         "status": "ok",
         "agents": list_agents(),
         "version": __version__,
         "observability": getattr(obs, "name", "unknown"),
         "state_store": getattr(store, "name", "unknown"),
+        "retrieval": getattr(retrieval, "name", "unknown"),
     }
+
+
+@api_v1.post("/knowledge/ingest", response_model=KnowledgeIngestResponse)
+async def ingest_knowledge(body: KnowledgeIngestRequest) -> KnowledgeIngestResponse:
+    """Curated document upsert into the active retrieval backend.
+
+    Requires ``accepted=true`` (Acceptance gate). Platform Jobs remain the
+    primary bulk ingest path; this endpoint is for human-approved summaries.
+    """
+    if not body.accepted:
+        raise HTTPException(
+            status_code=400,
+            detail="accepted=true is required before indexing (Acceptance gate)",
+        )
+    text = (body.text or "").strip()
+    summary = (body.summary or "").strip()
+    if summary:
+        text = f"Summary: {summary}\n\n{text}".strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text or summary is required")
+
+    provider = provider_for_corpus(body.corpus)
+    try:
+        provider.upsert(
+            corpus=body.corpus,
+            doc_id=body.doc_id,
+            text=text,
+            metadata=dict(body.metadata or {}),
+            source=body.source,
+        )
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return KnowledgeIngestResponse(
+        status="indexed",
+        corpus=body.corpus,
+        doc_id=body.doc_id,
+        retrieval=getattr(provider, "name", "unknown"),
+    )
 
 
 @api_v1.post("/rca/analyze", response_model=RcaResponse)
