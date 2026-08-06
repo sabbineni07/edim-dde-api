@@ -84,6 +84,20 @@ async def lifespan(_app: FastAPI):
             "Retrieval configure failed (%s); continuing with none", exc
         )
 
+    # Product P1: warn (default) or fail fast (EDIM_STRICT_STARTUP=1) on env gaps.
+    try:
+        from edim_dde_domain.startup import validate_runtime_env
+
+        validate_runtime_env()
+    except RuntimeError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Startup env validation failed unexpectedly: %s", exc
+        )
+
     bootstrap_agents()
 
     # Mirror Git-loaded agent YAML metadata into the durable catalog (if any).
