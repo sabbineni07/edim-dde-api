@@ -31,12 +31,29 @@ deploy/
 ## Deploy (Databricks Apps default)
 
 ```bash
-./deploy/scripts/build_vendor_wheels.sh
-# Edit deploy/databricks-app/app.yaml REPLACE_* values (no secrets in git)
-# Sync deploy/databricks-app/ to the workspace App and deploy
+cd edim-dde-api
+make help
+make vendor-wheels
+# Edit deploy/databricks-app/app.yaml REPLACE_* (no secrets in git)
+make apps-create APP_NAME=edim-dde-api-dev
+# Grant App SP → Key Vault Secrets User (key-vault-bootstrap.md §7)
+make apps-sync  APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/edim-dde-api-dev
+make apps-deploy APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/edim-dde-api-dev
 ```
 
-Full runbook: [Deploy & hosting](../edim-dde-domain/docs/api/deploy-and-hosting.md).
+Full runbook (Apps console / CLI / CI, packaging Options A–D): [Deploy & hosting §5](../edim-dde-domain/docs/api/deploy-and-hosting.md#5-deploy--databricks-apps-default).
+
+## Docker Compose (API + Postgres) — local E2E
+
+```bash
+cd edim-dde-api
+# Foundry vars in ../edim-dde-domain/.env
+make e2e-local           # compose-up + dry health/tuning/RCA
+# or:
+make compose-up && make e2e-dry && make compose-down
+```
+
+Postgres = control-plane StateStore only. Guide: [Deploy §6.1](../edim-dde-domain/docs/api/deploy-and-hosting.md#61-docker-compose-api--postgres--recommended-locally) · [Live smoke](../edim-dde-domain/docs/contribute/live-smoke-test.md).
 ## Setup
 
 ```bash

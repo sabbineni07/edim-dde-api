@@ -1,12 +1,13 @@
 # syntax=docker/dockerfile:1
-# Portable image for Azure Container Apps / AKS / App Service / local Docker.
+# Portable image for Azure Container Apps / AKS / App Service / local Docker Compose.
 # Same entrypoint as Databricks Apps: edim_dde_api.main:app
 #
 # Build (from edim-dde-api/ after vendor wheels exist):
-#   ./deploy/scripts/build_vendor_wheels.sh
+#   make vendor-wheels
 #   docker build -f deploy/docker/Dockerfile -t edim-dde-api:local .
+#   # or: make compose-up
 #
-# Run:
+# Run (single container):
 #   docker run --rm -p 8080:8080 --env-file ../edim-dde-domain/.env edim-dde-api:local
 
 FROM python:3.11-slim
@@ -26,7 +27,9 @@ RUN pip install --no-cache-dir -U pip \
  && pip install --no-cache-dir \
       "databricks-sql-connector>=3.0" \
       "azure-identity>=1.15" \
-      "openai>=1.40"
+      "azure-keyvault-secrets>=4.8" \
+      "openai>=1.40" \
+      "psycopg[binary]>=3.1"
 
 # Non-root where possible
 RUN useradd --create-home --shell /bin/bash edim && chown -R edim:edim /app

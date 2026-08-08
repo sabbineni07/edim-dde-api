@@ -1,24 +1,29 @@
-# Databricks Apps — EDIM DDE API
+# Databricks Apps — EDIM DDE API (FastAPI)
 
-Thin host adapter for **Databricks Apps**. Runtime code lives in the Python packages;
-this folder only defines how the platform starts the process and which deps to install.
+Thin host adapter. **Runtime** = FastAPI via `app.yaml` → `uvicorn`.  
+**Control plane** to create/deploy = Databricks Apps console or CLI (not a frontend UI app).
 
-**Engineer guide (full design + ACA/Docker):**  
-[`edim-dde-domain/docs/api/deploy-and-hosting.md`](../../edim-dde-domain/docs/api/deploy-and-hosting.md)
+**Engineer guide:**  
+[`edim-dde-domain/docs/api/deploy-and-hosting.md`](../../../edim-dde-domain/docs/api/deploy-and-hosting.md) §5  
+(packaging Options A–D, naming `edim-dde-api-*`)  
+**Key Vault Secrets User for App SP:**  
+[`key-vault-bootstrap.md`](../../../edim-dde-domain/docs/platform/key-vault-bootstrap.md) §7
 
-## Quick start
+## Quick start (Option A — bundle + vendor wheels)
 
-1. Build installable wheels into `vendor/` (from repo root / siblings):
+```bash
+cd edim-dde-api
+make help
+make vendor-wheels
+# edit deploy/databricks-app/app.yaml  (REPLACE_* — no secrets in git)
+make apps-create APP_NAME=edim-dde-api-dev
+# Grant App SP → Key Vault Secrets User (guide §7)
+make apps-sync  APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/edim-dde-api-dev
+make apps-deploy APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/edim-dde-api-dev
+curl -sS "https://<app-url>/health"
+```
 
-   ```bash
-   # from edim-dde-api/
-   ./deploy/scripts/build_vendor_wheels.sh
-   ```
+What is installed: `vendor/*.whl` listed in `requirements.vendor.txt` — **not** package `src/` trees.  
+`vendor/` is gitignored; rebuild before each deploy (or move to a private index — Option C in the guide).
 
-2. Set env in `app.yaml` (or Apps UI → Environment) — never commit secrets.
-
-3. Create / deploy the App in the Databricks workspace pointing at this directory
-   (or a sync of it). See the engineer guide for CLI/UI steps.
-
-4. Validate: `GET /health`, then live `POST /api/v1/recommendations` while signed into the App
-   (SQL uses `X-Forwarded-Access-Token`).
+Validate live SQL while signed into the App (`X-Forwarded-Access-Token`). See guide §5.7.

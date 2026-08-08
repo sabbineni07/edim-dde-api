@@ -1,0 +1,79 @@
+# EDIM DDE API — local Docker Compose (API + Postgres control-plane store)
+#
+# Postgres = StateStore (agent catalog / sessions) — NOT Databricks SQL / UC.
+#
+# From edim-dde-api/:
+#   make compose-up      # build + start api + postgres
+#   make e2e-dry         # health + dry tuning + dry RCA (needs Foundry in .env)
+#   make compose-down
+#
+# Optional Redis:
+#   docker compose --profile redis up --build -d
+#
+# Env: ../edim-dde-domain/.env for DATABRICKS_* / AZURE_OPENAI_* / EDIM_FOUNDRY_*.
+# Compose always sets EDIM_STATE_STORE=postgres and DSN → service "postgres".
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: edim-postgres
+    environment:
+      POSTGRES_USER: edim
+      POSTGRES_PASSWORD: edim
+      POSTGRES_DB: edim
+    ports:
+      - "5432:5432"
+    volumes:
+      - edim_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edim -d edim"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+    image: edim-dde-api:local
+    container_name: edim-dde-api
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: ../edim-dde-domain/.env
+        required: false
+    environment:
+      PORT: "8080"
+      EDIM_ENV: ${EDIM_ENV:-dev}
+      # Control-plane StateStore → compose Postgres service
+      EDIM_STATE_STORE: postgres
+      EDIM_DATABASE_URL: postgresql://edim:edim@postgres:5432/edim
+      EDIM_STRICT_STARTUP: ${EDIM_STRICT_STARTUP:-0}
+      EDIM_OBSERVABILITY: ${EDIM_OBSERVABILITY:-none}
+      EDIM_RETRIEVAL: ${EDIM_RETRIEVAL:-none}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: edim-redis
+    ports:
+      - "6379:6379"
+    profiles: ["redis"]
+
+volumes:
+  edim_pg_data:
+    name: edim_pg_data
