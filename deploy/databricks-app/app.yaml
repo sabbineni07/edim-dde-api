@@ -52,9 +52,9 @@ env:
   # Alternative: Apps secrets UI injects EDIM_FOUNDRY_CLIENT_ID/SECRET/TENANT_ID;
   # leave AZURE_KEY_VAULT_URL unset.
 
-  # Map vault secret names -> runtime env names expected by Foundry auth
+  # Map runtime env <- vault secret names (ENV_VAR:vaultSecret,...)
   - name: EDIM_KV_SECRET_MAP
-    value: "DLABS-DIM-ADB-APP-AIF-APPID:EDIM_FOUNDRY_CLIENT_ID,DLABS-DIM-ADB-APP-AIF-APPKEY:EDIM_FOUNDRY_CLIENT_SECRET"
+    value: "EDIM_FOUNDRY_CLIENT_ID:DLABS-DIM-ADB-APP-AIF-APPID,EDIM_FOUNDRY_CLIENT_SECRET:DLABS-DIM-ADB-APP-AIF-APPKEY"
 
   # --- Optional planes (safe defaults for first cut) ---
   - name: EDIM_OBSERVABILITY

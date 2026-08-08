@@ -4,7 +4,7 @@
 # Engineer guide: ../edim-dde-domain/docs/api/deploy-and-hosting.md (§5 Apps, §6 Docker)
 # Smoke: ../edim-dde-domain/docs/contribute/live-smoke-test.md
 
-.PHONY: help vendor-wheels apps-create apps-sync apps-deploy apps-get apps-list \
+.PHONY: help vendor-wheels vendor-wheels-win apps-create apps-sync apps-deploy apps-get apps-list \
 	docker-build docker-run compose-up compose-down compose-ps compose-logs \
 	e2e-health e2e-dry e2e-local clean-vendor
 
@@ -13,6 +13,7 @@ APP_NAME ?= edim-dde-api-dev
 WS_SOURCE ?=
 EDIM_AI_PATH ?=
 EDIM_DOMAIN_PATH ?=
+GIT_BASH ?= C:/Program Files/Git/bin/bash.exe
 DOCKER_IMAGE ?= edim-dde-api:local
 BASE ?= http://127.0.0.1:8080
 EXPECT_STATE_STORE ?= postgres
@@ -29,11 +30,15 @@ help: ## Show this help
 	@echo "  (put Foundry/Databricks vars in ../edim-dde-domain/.env)"
 	@echo ""
 	@echo "Databricks Apps: make vendor-wheels && make apps-create … (docs §5)"
+	@echo "Windows PowerShell: make vendor-wheels-win"
 
 vendor-wheels: ## Build ai+domain+api wheels into deploy/databricks-app/vendor/
 	@if [ -n "$(EDIM_AI_PATH)" ]; then export EDIM_AI_PATH="$(EDIM_AI_PATH)"; fi; \
 	if [ -n "$(EDIM_DOMAIN_PATH)" ]; then export EDIM_DOMAIN_PATH="$(EDIM_DOMAIN_PATH)"; fi; \
 	PYTHON="$(PYTHON)" ./deploy/scripts/build_vendor_wheels.sh
+
+vendor-wheels-win: ## Windows PowerShell wrapper for vendor-wheels (uses Git Bash + .venv python)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/build_vendor_wheels.ps1 -GitBashPath "$(GIT_BASH)" -EdimAiPath "$(EDIM_AI_PATH)" -EdimDomainPath "$(EDIM_DOMAIN_PATH)"
 
 apps-create: ## Create Databricks App shell (APP_NAME)
 	databricks apps create "$(APP_NAME)" --description "EDIM DDE API ($(APP_NAME))"
@@ -80,17 +85,17 @@ compose-logs: ## Tail API + Postgres logs
 
 e2e-health: ## Wait for /health (BASE); assert state_store=postgres by default
 	BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" PYTHON="$(PYTHON)" \
-		bash -c 'set -euo pipefail; \
-		deadline=$$((SECONDS+90)); \
-		while ! curl -sfS "$$BASE/health" >/tmp/edim-e2e-health.json; do \
-		  if (( SECONDS >= deadline )); then echo "health timeout" >&2; exit 1; fi; \
-		  sleep 2; \
-		done; \
-		$(PYTHON) -c "import json; h=json.load(open(\"/tmp/edim-e2e-health.json\")); print(h); assert h.get(\"status\")==\"ok\"; assert h.get(\"state_store\")==\"$(EXPECT_STATE_STORE)\", h"'
+	bash -c 'set -euo pipefail; \
+	deadline=$$((SECONDS+90)); \
+	while ! curl -sfS "$$BASE/health" >/tmp/edim-e2e-health.json; do \
+	if (( SECONDS >= deadline )); then echo "health timeout" >&2; exit 1; fi; \
+	sleep 2; \
+	done; \
+	$(PYTHON) -c "import json; h=json.load(open(\"/tmp/edim-e2e-health.json\")); print(h); assert h.get(\"status\")==\"ok\"; assert h.get(\"state_store\")==\"$(EXPECT_STATE_STORE)\", h"'
 
 e2e-dry: ## Full dry E2E vs Compose/API (health + tuning + RCA; needs Foundry)
 	BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" PYTHON="$(PYTHON)" \
-		./deploy/scripts/e2e_smoke.sh
+	./deploy/scripts/e2e_smoke.sh
 
 e2e-local: ## compose-up + e2e-dry (one-shot local container E2E)
 	$(MAKE) compose-up
