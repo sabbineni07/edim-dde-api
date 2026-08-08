@@ -44,11 +44,13 @@ env:
   # Tenant GUID (not secret) — required if App SP opens Key Vault via DATABRICKS_CLIENT_*
   - name: AZURE_TENANT_ID
     value: "REPLACE_DIRECTORY_TENANT_GUID"
-  # Preferred: load Foundry SP from Key Vault (App SP = vault reader; Foundry SP = secrets inside)
+  # Preferred: load Foundry SP from Key Vault → EDIM_FOUNDRY_* (default secret map)
   - name: AZURE_KEY_VAULT_URL
     value: "https://REPLACE.vault.azure.net/"
-  # Do NOT set AZURE_CLIENT_ID/SECRET here when using KV — see docs/platform/access-and-permissions.md
-  # Alternative: Apps secrets UI injects AZURE_CLIENT_* and leave AZURE_KEY_VAULT_URL unset.
+  # Do NOT set AZURE_CLIENT_ID/SECRET for Foundry (pollutes SQL DefaultAzureCredential).
+  # Do NOT set EDIM_FOUNDRY_* here when using KV — vault injects them.
+  # Alternative: Apps secrets UI injects EDIM_FOUNDRY_CLIENT_ID/SECRET/TENANT_ID;
+  # leave AZURE_KEY_VAULT_URL unset.
 
   # --- Optional planes (safe defaults for first cut) ---
   - name: EDIM_OBSERVABILITY

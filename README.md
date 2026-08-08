@@ -61,7 +61,7 @@ Unset / empty → no cross-origin browser access (fine for curl / same-origin).
 ## Run
 
 ```bash
-# Local: az login for SQL + Foundry (or set AZURE_CLIENT_* from Key Vault in prod)
+# Local: az login for SQL + Foundry (or set EDIM_FOUNDRY_* from Key Vault in prod)
 uvicorn edim_dde_api.main:app --reload --port 8080
 ```
 

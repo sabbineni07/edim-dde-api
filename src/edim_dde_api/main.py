@@ -47,6 +47,12 @@ async def lifespan(_app: FastAPI):
         from edim_dde_domain.security import load_key_vault_secrets
 
         load_key_vault_secrets()
+        # Re-read env after vault inject (Foundry SP → EDIM_FOUNDRY_*).
+        from edim_dde_domain.config import clear_settings_cache
+        from edim_dde_domain.llm.foundry import clear_foundry_llm_provider_cache
+
+        clear_settings_cache()
+        clear_foundry_llm_provider_cache()
     except Exception as exc:  # noqa: BLE001 — startup should still allow /health
         import logging
 
