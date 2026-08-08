@@ -26,31 +26,35 @@ env:
   # --- Databricks SQL warehouse ---
   # Prefer Apps resource bindings / workspace defaults where available.
   - name: DATABRICKS_HOST
-    value: "REPLACE_ME.azuredatabricks.net"
+    value: "adb-1137828170459102.2.azuredatabricks.net"
   - name: DATABRICKS_HTTP_PATH
-    value: "/sql/1.0/warehouses/REPLACE_WAREHOUSE_ID"
+    value: "/sql/1.0/warehouses/a37a133da7c13757"
   - name: DATABRICKS_JOB_CLUSTER_METRICS_TABLE
-    value: "catalog.schema.job_cluster_metrics"
+    value: "dim_engineering_dev.maintenance_audit.dbx_job_cluster_metrics_all"
   - name: DATABRICKS_SPARK_METRICS_TABLE
-    value: "catalog.schema.spark_metrics"
+    value: "dim_engineering_dev.maintenance_audit.spark_metrics"
   - name: DATABRICKS_SPARK_LOGS_TABLE
-    value: "catalog.schema.spark_logs"
+    value: "dim_engineering_dev.maintenance_audit.spark_logs"
 
   # --- Azure AI Foundry (LLM) ---
   - name: AZURE_OPENAI_ENDPOINT
-    value: "https://REPLACE.openai.azure.com"
+    value: "https://aiplatform-dev-eus-aif-06.services.ai.azure.com/openai/v1"
   - name: AZURE_OPENAI_DEPLOYMENT_NAME
-    value: "gpt-4o"
+    value: "cc9815-ets-dae-gpt-5.4"
   # Tenant GUID (not secret) — required if App SP opens Key Vault via DATABRICKS_CLIENT_*
   - name: AZURE_TENANT_ID
-    value: "REPLACE_DIRECTORY_TENANT_GUID"
+    value: "4cb791f1-02d1-4a4e-8610-911ee57bb08c"
   # Preferred: load Foundry SP from Key Vault → EDIM_FOUNDRY_* (default secret map)
   - name: AZURE_KEY_VAULT_URL
-    value: "https://REPLACE.vault.azure.net/"
+    value: "https://dlabs-dev-eus-app-a-kv.vault.azure.net/"
   # Do NOT set AZURE_CLIENT_ID/SECRET for Foundry (pollutes SQL DefaultAzureCredential).
   # Do NOT set EDIM_FOUNDRY_* here when using KV — vault injects them.
   # Alternative: Apps secrets UI injects EDIM_FOUNDRY_CLIENT_ID/SECRET/TENANT_ID;
   # leave AZURE_KEY_VAULT_URL unset.
+
+  # Map vault secret names -> runtime env names expected by Foundry auth
+  - name: EDIM_KV_SECRET_MAP
+    value: "DLABS-DIM-ADB-APP-AIF-APPID:EDIM_FOUNDRY_CLIENT_ID,DLABS-DIM-ADB-APP-AIF-APPKEY:EDIM_FOUNDRY_CLIENT_SECRET"
 
   # --- Optional planes (safe defaults for first cut) ---
   - name: EDIM_OBSERVABILITY
