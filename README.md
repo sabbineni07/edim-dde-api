@@ -4,7 +4,7 @@ Thin **FastAPI** app. Agents and tools live in
 [`edim-dde-domain`](../edim-dde-domain); graphs run via
 [`edim-dde-ai`](../edim-dde-ai).
 
-**Docs:** [Stack engineer guide](../edim-dde-domain/docs/README.md) · [Endpoints](../edim-dde-domain/docs/api/endpoints.md) · [Configuration](../edim-dde-domain/docs/api/configuration.md)
+**Docs:** [Stack engineer guide](../edim-dde-domain/docs/README.md) · [Endpoints](../edim-dde-domain/docs/api/endpoints.md) · [Configuration](../edim-dde-domain/docs/api/configuration.md) · [**Deploy & hosting**](../edim-dde-domain/docs/api/deploy-and-hosting.md)
 
 ```text
 Client → edim-dde-api (HTTP)
@@ -22,8 +22,21 @@ src/edim_dde_api/
   middleware.py   # Apps user OAuth → ContextVar
   routes.py       # /health, /api/v1/rca/analyze, /api/v1/recommendations
   schemas.py      # request + response Pydantic models (OpenAPI)
+deploy/
+  databricks-app/ # app.yaml + requirements (default host)
+  docker/         # portable Dockerfile (ACA / AKS / …)
+  scripts/        # build_vendor_wheels.sh
 ```
 
+## Deploy (Databricks Apps default)
+
+```bash
+./deploy/scripts/build_vendor_wheels.sh
+# Edit deploy/databricks-app/app.yaml REPLACE_* values (no secrets in git)
+# Sync deploy/databricks-app/ to the workspace App and deploy
+```
+
+Full runbook: [Deploy & hosting](../edim-dde-domain/docs/api/deploy-and-hosting.md).
 ## Setup
 
 ```bash

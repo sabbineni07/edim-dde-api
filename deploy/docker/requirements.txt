@@ -1,0 +1,4 @@
+# Extra pins for Docker builds (wheels installed separately in Dockerfile).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.0
