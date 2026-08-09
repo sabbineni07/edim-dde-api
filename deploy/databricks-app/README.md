@@ -9,7 +9,7 @@ Thin host adapter. **Runtime** = FastAPI via `app.yaml` → `uvicorn`.
 **Key Vault Secrets User for App SP:**  
 [`key-vault-bootstrap.md`](../../../edim-dde-domain/docs/platform/key-vault-bootstrap.md) §7
 
-The Markdown **`/guide`** viewer is for **local Docker only** — it is not part of this Apps bundle. Use Git docs or `make compose-up` → `http://127.0.0.1:8080/guide`.
+The MkDocs Material **`/guide`** site is for **local Docker only** — it is not part of this Apps bundle. Use Git docs or `make guide-site && make compose-up` → `http://127.0.0.1:8080/guide/`.
 
 ## Quick start (Option A — bundle + vendor wheels)
 

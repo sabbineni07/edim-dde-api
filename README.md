@@ -41,11 +41,11 @@ make apps-sync  APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/
 make apps-deploy APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/edim-dde-api-dev
 ```
 
-Engineer Markdown guide (`/guide`) is **local Docker only** — not deployed to Apps:
+Engineer MkDocs guide (`/guide`) is **local Docker only** — not deployed to Apps:
 
 ```bash
-make compose-up
-# open http://127.0.0.1:8080/guide
+make guide-site && make compose-up
+# open http://127.0.0.1:8080/guide/
 ```
 
 Full runbook (Apps console / CLI / CI, packaging Options A–D): [Deploy & hosting §5](../edim-dde-domain/docs/api/deploy-and-hosting.md#5-deploy--databricks-apps-default).
@@ -64,7 +64,7 @@ Postgres = control-plane StateStore only. Guide: [Deploy §6.1](../edim-dde-doma
 ## Setup
 
 ```bash
-cd /Users/sabbineni/projects/edim/edim-dde-api
+cd edim-dde-api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e ".[dev]"
