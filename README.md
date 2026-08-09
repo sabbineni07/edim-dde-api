@@ -41,6 +41,13 @@ make apps-sync  APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/
 make apps-deploy APP_NAME=edim-dde-api-dev WS_SOURCE=/Workspace/Users/<you>/apps/edim-dde-api-dev
 ```
 
+Engineer Markdown guide (`/guide`) is **local Docker only** — not deployed to Apps:
+
+```bash
+make compose-up
+# open http://127.0.0.1:8080/guide
+```
+
 Full runbook (Apps console / CLI / CI, packaging Options A–D): [Deploy & hosting §5](../edim-dde-domain/docs/api/deploy-and-hosting.md#5-deploy--databricks-apps-default).
 
 ## Docker Compose (API + Postgres) — local E2E
