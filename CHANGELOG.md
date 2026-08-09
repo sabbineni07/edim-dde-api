@@ -1,6 +1,6 @@
 # Changelog — edim-dde-api
 
-## 1.0.0 — 2026-07-31 (Release 1 / Phase 0)
+## 1.0.0 — 2026-07-31 (Release 1)
 
 ### Added
 - Key Vault bootstrap on API lifespan

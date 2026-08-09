@@ -2,8 +2,8 @@
 # Portable image for Azure Container Apps / AKS / App Service / local Docker Compose.
 # Same entrypoint as Databricks Apps: edim_dde_api.main:app
 #
-# Build (from edim-dde-api/ after vendor wheels exist):
-#   make vendor-wheels
+# Build (from edim-dde-api/ after vendor wheels + guide-site exist):
+#   make vendor-wheels   # wheels + MkDocs guide-site
 #   docker build -f deploy/docker/Dockerfile -t edim-dde-api:local .
 #   # or: make compose-up
 #
@@ -20,6 +20,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY deploy/docker/requirements.txt /tmp/requirements.txt
 COPY deploy/databricks-app/vendor /app/vendor
+# Local Docker MkDocs Material site only (not part of Databricks Apps bundle)
+COPY deploy/docker/guide-site /app/guide-site
 
 RUN pip install --no-cache-dir -U pip \
  && pip install --no-cache-dir -r /tmp/requirements.txt \
@@ -30,6 +32,8 @@ RUN pip install --no-cache-dir -U pip \
       "azure-keyvault-secrets>=4.8" \
       "openai>=1.40" \
       "psycopg[binary]>=3.1"
+
+ENV EDIM_GUIDE_SITE_DIR=/app/guide-site
 
 # Non-root where possible
 RUN useradd --create-home --shell /bin/bash edim && chown -R edim:edim /app

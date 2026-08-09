@@ -4,7 +4,7 @@
 # Engineer guide: ../edim-dde-domain/docs/api/deploy-and-hosting.md (§5 Apps, §6 Docker)
 # Smoke: ../edim-dde-domain/docs/contribute/live-smoke-test.md
 
-.PHONY: help vendor-wheels vendor-wheels-win apps-create apps-sync apps-deploy apps-get apps-list \
+.PHONY: help vendor-wheels vendor-wheels-win guide-site apps-create apps-sync apps-deploy apps-get apps-list \
 	docker-build docker-run compose-up compose-down compose-ps compose-logs \
 	e2e-health e2e-dry e2e-local clean-vendor
 
@@ -30,12 +30,17 @@ help: ## Show this help
 	@echo "  (put Foundry/Databricks vars in ../edim-dde-domain/.env)"
 	@echo ""
 	@echo "Databricks Apps: make vendor-wheels && make apps-create … (docs §5)"
+	@echo "Local MkDocs guide: make guide-site && make compose-up → http://127.0.0.1:8080/guide/"
 	@echo "Windows PowerShell: make vendor-wheels-win"
 
-vendor-wheels: ## Build ai+domain+api wheels into deploy/databricks-app/vendor/
+vendor-wheels: ## Build ai+domain+api wheels + MkDocs guide-site for Docker
 	@if [ -n "$(EDIM_AI_PATH)" ]; then export EDIM_AI_PATH="$(EDIM_AI_PATH)"; fi; \
 	if [ -n "$(EDIM_DOMAIN_PATH)" ]; then export EDIM_DOMAIN_PATH="$(EDIM_DOMAIN_PATH)"; fi; \
 	PYTHON="$(PYTHON)" ./deploy/scripts/build_vendor_wheels.sh
+
+guide-site: ## Build MkDocs Material site → deploy/docker/guide-site (local /guide only)
+	@if [ -n "$(EDIM_DOMAIN_PATH)" ]; then export EDIM_DOMAIN_PATH="$(EDIM_DOMAIN_PATH)"; fi; \
+	PYTHON="$(PYTHON)" ./deploy/scripts/build_guide_site.sh
 
 vendor-wheels-win: ## Windows PowerShell wrapper for vendor-wheels (uses Git Bash + .venv python)
 	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/build_vendor_wheels.ps1 -GitBashPath "$(GIT_BASH)" -EdimAiPath "$(EDIM_AI_PATH)" -EdimDomainPath "$(EDIM_DOMAIN_PATH)"
