@@ -24,8 +24,10 @@ from fastapi.responses import JSONResponse
 
 from edim_dde_api import __version__
 from edim_dde_api.guide import mount_guide
-from edim_dde_api.middleware import DatabricksUserTokenMiddleware
+from edim_dde_api.middleware import DatabricksUserTokenMiddleware, RequestIdMiddleware
+from edim_dde_api.request_context import configure_request_id_logging
 from edim_dde_api.routes import api_v1, router
+from edim_dde_api.safe_logging import log_exception_once, safe_exc_message
 
 
 def _cors_origins() -> list[str]:
@@ -43,6 +45,10 @@ def _cors_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    import logging
+
+    log = logging.getLogger(__name__)
+    configure_request_id_logging()
     # BL-013: load Key Vault secrets into env (no overwrite of existing values).
     try:
         from edim_dde_domain.security import load_key_vault_secrets
@@ -55,40 +61,44 @@ async def lifespan(_app: FastAPI):
         clear_settings_cache()
         clear_foundry_llm_provider_cache()
     except Exception as exc:  # noqa: BLE001 — startup should still allow /health
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "Key Vault bootstrap skipped/failed: %s", exc
+        log_exception_once(
+            log,
+            "Key Vault bootstrap skipped/failed",
+            exc,
+            level=logging.WARNING,
         )
 
     # Pluggable observability: EDIM_OBSERVABILITY=none|langsmith|mlflow|auto
     try:
         configure_observability_from_env()
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "Observability configure failed (%s); continuing with no-op", exc
+        log_exception_once(
+            log,
+            "Observability configure failed; continuing with no-op",
+            exc,
+            level=logging.WARNING,
         )
 
     # Control-plane store: EDIM_STATE_STORE=memory|postgres|cosmos|redis
     try:
         configure_state_store_from_env()
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "State store configure failed (%s); continuing with memory", exc
+        log_exception_once(
+            log,
+            "State store configure failed; continuing with memory",
+            exc,
+            level=logging.WARNING,
         )
 
     # Retrieval plane: EDIM_RETRIEVAL=none|memory|faiss|azure_ai_search|databricks_vector
     try:
         configure_retrieval_from_env()
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "Retrieval configure failed (%s); continuing with none", exc
+        log_exception_once(
+            log,
+            "Retrieval configure failed; continuing with none",
+            exc,
+            level=logging.WARNING,
         )
 
     # Product P1: warn (default) or fail fast (EDIM_STRICT_STARTUP=1) on env gaps.
@@ -99,10 +109,11 @@ async def lifespan(_app: FastAPI):
     except RuntimeError:
         raise
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "Startup env validation failed unexpectedly: %s", exc
+        log_exception_once(
+            log,
+            "Startup env validation failed unexpectedly",
+            exc,
+            level=logging.WARNING,
         )
 
     bootstrap_agents()
@@ -111,10 +122,11 @@ async def lifespan(_app: FastAPI):
     try:
         sync_registered_agents_to_store(actor="api-lifespan")
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "Agent catalog sync failed: %s", exc
+        log_exception_once(
+            log,
+            "Agent catalog sync failed",
+            exc,
+            level=logging.WARNING,
         )
 
     class _LazyFoundry:
@@ -151,6 +163,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(DatabricksUserTokenMiddleware)
+app.add_middleware(RequestIdMiddleware)
 app.include_router(router)
 app.include_router(api_v1)
 mount_guide(app)
@@ -160,9 +173,21 @@ mount_guide(app)
 async def foundry_not_configured_handler(
     _request: Request, exc: FoundryLLMNotConfiguredError
 ) -> JSONResponse:
+    # Logged once here (not also in routes) — bubbles from Foundry provider.
+    import logging
+
+    log_exception_once(
+        logging.getLogger(__name__),
+        "Foundry LLM not configured",
+        exc,
+        level=logging.WARNING,
+    )
     return JSONResponse(
         status_code=503,
-        content={"detail": str(exc), "error_code": "FOUNDRY_LLM_NOT_CONFIGURED"},
+        content={
+            "detail": safe_exc_message(exc),
+            "error_code": "FOUNDRY_LLM_NOT_CONFIGURED",
+        },
     )
 
 
@@ -170,9 +195,19 @@ async def foundry_not_configured_handler(
 async def chain_invoker_handler(
     _request: Request, exc: ChainInvokerError
 ) -> JSONResponse:
+    import logging
+
+    log_exception_once(
+        logging.getLogger(__name__),
+        "LLM chain invoke failed",
+        exc,
+    )
     return JSONResponse(
         status_code=503,
-        content={"detail": str(exc), "error_code": "LLM_CHAIN_ERROR"},
+        content={
+            "detail": "LLM chain failed; see server logs for details",
+            "error_code": "LLM_CHAIN_ERROR",
+        },
     )
 
 

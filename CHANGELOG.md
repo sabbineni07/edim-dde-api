@@ -1,5 +1,10 @@
 # Changelog — edim-dde-api
 
+## Unreleased
+
+### Changed
+- **Breaking:** `POST /api/v1/recommendations` → `POST /api/v1/cluster_tuning/recommend` (hard cutover; old path returns 404)
+
 ## 1.0.0 — 2026-07-31 (Release 1)
 
 ### Added

@@ -92,9 +92,9 @@ def test_health_http(client: TestClient):
     assert "spark_rca" in body["agents"]
 
 
-def test_recommendations_v1_http(client: TestClient):
+def test_cluster_tuning_recommend_v1_http(client: TestClient):
     res = client.post(
-        "/api/v1/recommendations",
+        "/api/v1/cluster_tuning/recommend",
         json={
             "job_id": "j-1",
             "cluster_id": "c-1",
@@ -119,7 +119,7 @@ def test_recommendations_v1_http(client: TestClient):
     assert "resource_optimization" in body["comparison"]
     assert "cost" not in body["comparison"]
     # Unversioned path removed
-    assert client.post("/api/recommendations", json={"job_id": "j", "cluster_id": "c"}).status_code == 404
+    assert client.post("/api/v1/recommendations", json={"job_id": "j", "cluster_id": "c"}).status_code == 404
 
 
 def test_rca_analyze_v1_http(client: TestClient):
