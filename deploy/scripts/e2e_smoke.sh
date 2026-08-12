@@ -50,7 +50,7 @@ if [[ -n "${EXPECT_STORE}" ]]; then
 fi
 
 echo "==> Dry cluster_tuning (SQL skipped via metrics override)"
-curl -sfS "$BASE/api/v1/recommendations" \
+curl -sfS "$BASE/api/v1/cluster_tuning/recommend" \
   -H 'content-type: application/json' \
   -H 'X-Request-Id: e2e-dry-tuning-001' \
   -d '{

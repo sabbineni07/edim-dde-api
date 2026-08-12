@@ -25,16 +25,26 @@ class RootCause(BaseModel):
     category: str
     summary: str
     confidence: float
+    confidence_label: Optional[str] = None
+    failure_signature: Optional[str] = None
 
 
 class RcaResponse(BaseModel):
     """Stable HTTP shape for Spark RCA (not the full agent state bag)."""
 
+    request_id: Optional[str] = None
     job_id: Optional[str] = None
     job_run_id: Optional[str] = None
+    task_key: Optional[str] = None
     status: str = "completed"
+    job_status: Optional[str] = None
     root_cause: RootCause
     recommended_actions: list[str] = Field(default_factory=list)
+    contributing_factors: list[str] = Field(default_factory=list)
+    evidence_analysis: dict[str, Any] = Field(default_factory=dict)
+    recommendations: dict[str, Any] = Field(default_factory=dict)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
     classification_hint: dict[str, Any] = Field(default_factory=dict)
     evidence_pack: Optional[dict[str, Any]] = None
 
@@ -98,6 +108,7 @@ class TuningRequest(BaseModel):
 class TuningResponse(BaseModel):
     """Stable HTTP shape for cluster tuning (projected from agent state)."""
 
+    request_id: Optional[str] = None
     job_id: Optional[str] = None
     cluster_id: Optional[str] = None
     job_run_id: Optional[str] = None
@@ -120,9 +131,12 @@ def rca_response_from_agent_state(final: dict[str, Any]) -> RcaResponse:
     return RcaResponse.model_validate(result)
 
 
-def tuning_response_from_agent_state(final: dict[str, Any]) -> TuningResponse:
+def tuning_response_from_agent_state(
+    final: dict[str, Any], *, request_id: str | None = None
+) -> TuningResponse:
     """Map agent state → TuningResponse (explicit field projection)."""
     return TuningResponse(
+        request_id=request_id or final.get("request_id"),
         job_id=final.get("job_id"),
         cluster_id=final.get("cluster_id"),
         job_run_id=final.get("job_run_id"),

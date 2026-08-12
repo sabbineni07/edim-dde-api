@@ -20,7 +20,7 @@ Client → edim-dde-api (HTTP)
 src/edim_dde_api/
   main.py         # lifespan, CORS, LLM, exception handlers
   middleware.py   # Apps user OAuth → ContextVar
-  routes.py       # /health, /api/v1/rca/analyze, /api/v1/recommendations
+  routes.py       # /health, /api/v1/rca/analyze, /api/v1/cluster_tuning/recommend
   schemas.py      # request + response Pydantic models (OpenAPI)
 deploy/
   databricks-app/ # app.yaml + requirements (default host)
@@ -90,7 +90,7 @@ uvicorn edim_dde_api.main:app --reload --port 8080
 ```
 
 ```bash
-curl -s http://127.0.0.1:8080/api/v1/recommendations \
+curl -s http://127.0.0.1:8080/api/v1/cluster_tuning/recommend \
   -H 'content-type: application/json' \
   -d '{"job_id":"123","cluster_id":"456","include_explanation":false}'
 ```
@@ -101,7 +101,11 @@ Versioned API surface:
 |--------|------|----------------|
 | GET | `/health` | status + agents |
 | POST | `/api/v1/rca/analyze` | `RcaResponse` |
-| POST | `/api/v1/recommendations` | `TuningResponse` |
+| POST | `/api/v1/cluster_tuning/recommend` | `TuningResponse` |
+
+**Breaking:** `/api/v1/recommendations` is not registered (404). Use `/api/v1/cluster_tuning/recommend`.
+
+Optional `X-Request-Id` is echoed on the response; stdlib logs include `[request_id=…]`. Failures log a redacted stack once at the HTTP boundary; JSON `detail` stays short.
 
 On Databricks Apps, the gateway forwards `X-Forwarded-Access-Token`; middleware binds
 it for SQL. `Authorization: Bearer` is not used as a Databricks token.
