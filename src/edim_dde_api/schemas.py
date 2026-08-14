@@ -116,9 +116,12 @@ class TuningResponse(BaseModel):
     current_configuration: dict[str, Any] = Field(default_factory=dict)
     comparison: dict[str, Any] = Field(default_factory=dict)
     risk_assessment: dict[str, Any] = Field(default_factory=dict)
+    performance_validation: dict[str, Any] = Field(default_factory=dict)
     pattern_analysis: str = ""
     reason_codes: list[str] = Field(default_factory=list)
     guardrail_adjustments: list[Any] = Field(default_factory=list)
+    sizing_attempts: int = 1
+    guardrail_retries: int = 0
     job_cluster_metrics: dict[str, Any] = Field(default_factory=dict)
     explanation: str = ""
 
@@ -135,6 +138,10 @@ def tuning_response_from_agent_state(
     final: dict[str, Any], *, request_id: str | None = None
 ) -> TuningResponse:
     """Map agent state → TuningResponse (explicit field projection)."""
+    attempts = int(final.get("sizing_attempts") or 1)
+    retries = final.get("guardrail_retries")
+    if retries is None:
+        retries = max(0, attempts - 1)
     return TuningResponse(
         request_id=request_id or final.get("request_id"),
         job_id=final.get("job_id"),
@@ -144,9 +151,12 @@ def tuning_response_from_agent_state(
         current_configuration=final.get("current_configuration") or {},
         comparison=final.get("comparison") or {},
         risk_assessment=final.get("risk_assessment") or {},
+        performance_validation=final.get("performance_validation") or {},
         pattern_analysis=str(final.get("pattern_analysis") or ""),
         reason_codes=list(final.get("reason_codes") or []),
         guardrail_adjustments=list(final.get("guardrail_adjustments") or []),
+        sizing_attempts=attempts,
+        guardrail_retries=int(retries),
         job_cluster_metrics=final.get("metrics") or {},
         explanation=str(final.get("explanation") or ""),
     )
