@@ -90,6 +90,28 @@ async def lifespan(_app: FastAPI):
             level=logging.WARNING,
         )
 
+    # Recommendation history: EDIM_RECOMMENDATION_STORE (default inherits StateStore)
+    try:
+        from edim_dde_ai import configure_recommendation_store_from_env
+
+        configure_recommendation_store_from_env()
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            log,
+            "Recommendation store configure failed; continuing with none",
+            exc,
+            level=logging.WARNING,
+        )
+        try:
+            from edim_dde_ai.recommendations import (
+                NoneRecommendationStore,
+                set_recommendation_store,
+            )
+
+            set_recommendation_store(NoneRecommendationStore())
+        except Exception:  # noqa: BLE001
+            pass
+
     # Retrieval plane: EDIM_RETRIEVAL=none|memory|faiss|azure_ai_search|databricks_vector
     try:
         configure_retrieval_from_env()

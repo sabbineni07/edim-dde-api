@@ -124,6 +124,37 @@ class TuningResponse(BaseModel):
     guardrail_retries: int = 0
     job_cluster_metrics: dict[str, Any] = Field(default_factory=dict)
     explanation: str = ""
+    recommendation_id: Optional[str] = Field(
+        None,
+        description="Persisted history id when recommendation store is enabled",
+    )
+    recommendation_status: Optional[str] = Field(
+        None,
+        description="Lifecycle status when persisted (e.g. proposed)",
+    )
+
+
+class RecommendationStatusUpdate(BaseModel):
+    status: str = Field(
+        ...,
+        description="proposed | accepted | rejected | applied | superseded",
+        examples=["accepted"],
+    )
+
+
+class RecommendationHistoryItem(BaseModel):
+    recommendation_id: str
+    agent_id: str = "cluster_tuning"
+    status: str
+    job_id: Optional[str] = None
+    cluster_id: Optional[str] = None
+    job_run_id: Optional[str] = None
+    request_id: Optional[str] = None
+    env: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    response: dict[str, Any] = Field(default_factory=dict)
+    request: dict[str, Any] = Field(default_factory=dict)
 
 
 def rca_response_from_agent_state(final: dict[str, Any]) -> RcaResponse:
@@ -159,4 +190,6 @@ def tuning_response_from_agent_state(
         guardrail_retries=int(retries),
         job_cluster_metrics=final.get("metrics") or {},
         explanation=str(final.get("explanation") or ""),
+        recommendation_id=final.get("recommendation_id"),
+        recommendation_status=final.get("recommendation_status"),
     )

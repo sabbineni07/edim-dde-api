@@ -118,8 +118,31 @@ def test_cluster_tuning_recommend_v1_http(client: TestClient):
     assert body["recommendation"]["recommended_max_workers"] < 16
     assert "resource_optimization" in body["comparison"]
     assert "cost" not in body["comparison"]
+    assert body.get("recommendation_id")
+    assert body.get("recommendation_status") == "proposed"
+    rid = body["recommendation_id"]
+    listed = client.get("/api/v1/cluster_tuning/recommendations", params={"job_id": "j-1"})
+    assert listed.status_code == 200
+    assert any(row["recommendation_id"] == rid for row in listed.json())
+    got = client.get(f"/api/v1/cluster_tuning/recommendations/{rid}")
+    assert got.status_code == 200
+    assert got.json()["job_id"] == "j-1"
+    patched = client.patch(
+        f"/api/v1/cluster_tuning/recommendations/{rid}",
+        json={"status": "accepted"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["status"] == "accepted"
     # Unversioned path removed
     assert client.post("/api/v1/recommendations", json={"job_id": "j", "cluster_id": "c"}).status_code == 404
+
+
+def test_health_includes_recommendation_store(client: TestClient):
+    res = client.get("/health")
+    assert res.status_code == 200
+    body = res.json()
+    assert "recommendation_store" in body
+    assert body["recommendation_store"] in {"memory", "none", "postgres", "cosmos", "redis"}
 
 
 def test_rca_analyze_v1_http(client: TestClient):

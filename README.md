@@ -50,7 +50,19 @@ make guide-site && make compose-up
 
 Full runbook (Apps console / CLI / CI, packaging Options A–D): [Deploy & hosting §5](../edim-dde-domain/docs/api/deploy-and-hosting.md#5-deploy--databricks-apps-default).
 
-## Docker Compose (API + Postgres) — local E2E
+## Docker — local E2E
+
+**A. API on laptop + Postgres in Docker** (use this when `az login` must run on the host):
+
+```bash
+cd edim-dde-api
+az login
+# Foundry/Databricks vars in ../edim-dde-domain/.env
+make host-run            # starts Postgres container + uvicorn on :8080
+# make pg-down           # stop Postgres when done
+```
+
+**B. API + Postgres both in Docker** (Foundry via `.env` / SP — host `az login` does not enter the container):
 
 ```bash
 cd edim-dde-api

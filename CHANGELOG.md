@@ -8,6 +8,8 @@
 ### Added
 - `TuningResponse.sizing_attempts` / `guardrail_retries` — how many sizing LLM calls / re-prompts ran (guardrail retry loop)
 - `TuningResponse.performance_validation` — rule-based peak-load fitness after sizing
+- **Recommendation history** — lifespan `configure_recommendation_store_from_env`; best-effort persist on `POST …/cluster_tuning/recommend`; `GET/PATCH …/cluster_tuning/recommendations`; `/health.recommendation_store`
+- `TuningResponse.recommendation_id` / `recommendation_status`
 
 ## 1.0.0 — 2026-07-31 (Release 1)
 

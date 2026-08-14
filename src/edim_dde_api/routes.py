@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 from edim_dde_ai import create_agent, list_agents
 from edim_dde_ai.observability import build_run_config, get_observability_provider
+from edim_dde_ai.recommendations import (
+    RecommendationRecord,
+    get_recommendation_store,
+    new_recommendation_id,
+)
 from edim_dde_ai.retrieval import get_retrieval_provider, provider_for_corpus
 from edim_dde_ai.store import get_state_store
 from edim_dde_domain.errors import (
@@ -24,7 +30,7 @@ from edim_dde_domain.sources import (
     reset_request_databricks_token,
     set_request_databricks_token,
 )
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from edim_dde_api import __version__
 from edim_dde_api.request_context import (
@@ -38,6 +44,8 @@ from edim_dde_api.schemas import (
     KnowledgeIngestResponse,
     RcaRequest,
     RcaResponse,
+    RecommendationHistoryItem,
+    RecommendationStatusUpdate,
     TuningRequest,
     TuningResponse,
     rca_response_from_agent_state,
@@ -118,12 +126,14 @@ def health() -> dict[str, Any]:
     obs = get_observability_provider()
     store = get_state_store()
     retrieval = get_retrieval_provider()
+    rec_store = get_recommendation_store()
     return {
         "status": "ok",
         "agents": list_agents(),
         "version": __version__,
         "observability": getattr(obs, "name", "unknown"),
         "state_store": getattr(store, "name", "unknown"),
+        "recommendation_store": getattr(rec_store, "name", "unknown"),
         "retrieval": getattr(retrieval, "name", "unknown"),
     }
 
@@ -260,7 +270,9 @@ async def recommend_cluster(
             lambda: agent.invoke(payload, config=config),
             request_id=rid,
         )
-        return tuning_response_from_agent_state(final, request_id=rid)
+        response = tuning_response_from_agent_state(final, request_id=rid)
+        response = _persist_tuning_recommendation(body, response, request_id=rid)
+        return response
     except NoJobMetricsError as exc:
         raise _http_from_exc(
             status_code=404,
@@ -284,3 +296,113 @@ async def recommend_cluster(
             where="cluster_tuning/recommend domain/SQL tool failed",
             detail=safe_exc_message(exc),
         ) from exc
+
+
+def _persist_tuning_recommendation(
+    body: TuningRequest,
+    response: TuningResponse,
+    *,
+    request_id: str,
+) -> TuningResponse:
+    """Best-effort save to RecommendationStore; never fail the HTTP success path."""
+    store = get_recommendation_store()
+    if getattr(store, "name", "") == "none":
+        return response
+    try:
+        rec_id = new_recommendation_id()
+        record = RecommendationRecord(
+            recommendation_id=rec_id,
+            agent_id="cluster_tuning",
+            status="proposed",
+            job_id=response.job_id or body.job_id,
+            cluster_id=response.cluster_id or body.cluster_id,
+            job_run_id=response.job_run_id or body.job_run_id,
+            request_id=request_id,
+            env=os.environ.get("EDIM_ENV"),
+            request=body.model_dump(exclude={"metrics"}),
+            response=response.model_dump(),
+        )
+        store.save(record)
+        return response.model_copy(
+            update={
+                "recommendation_id": rec_id,
+                "recommendation_status": "proposed",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            logger,
+            "cluster_tuning recommendation persist failed",
+            exc,
+            level=logging.WARNING,
+        )
+        return response
+
+
+def _history_item(record: RecommendationRecord) -> RecommendationHistoryItem:
+    return RecommendationHistoryItem(
+        recommendation_id=record.recommendation_id,
+        agent_id=record.agent_id,
+        status=record.status,
+        job_id=record.job_id,
+        cluster_id=record.cluster_id,
+        job_run_id=record.job_run_id,
+        request_id=record.request_id,
+        env=record.env,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        response=record.response or {},
+        request=record.request or {},
+    )
+
+
+@api_v1.get(
+    "/cluster_tuning/recommendations",
+    response_model=list[RecommendationHistoryItem],
+)
+def list_tuning_recommendations(
+    job_id: str | None = Query(default=None),
+    cluster_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[RecommendationHistoryItem]:
+    """List persisted cluster-tuning recommendations (newest first)."""
+    store = get_recommendation_store()
+    rows = store.list(
+        job_id=job_id,
+        cluster_id=cluster_id,
+        status=status,
+        agent_id="cluster_tuning",
+        limit=limit,
+    )
+    return [_history_item(r) for r in rows]
+
+
+@api_v1.get(
+    "/cluster_tuning/recommendations/{recommendation_id}",
+    response_model=RecommendationHistoryItem,
+)
+def get_tuning_recommendation(recommendation_id: str) -> RecommendationHistoryItem:
+    store = get_recommendation_store()
+    row = store.get(recommendation_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    return _history_item(row)
+
+
+@api_v1.patch(
+    "/cluster_tuning/recommendations/{recommendation_id}",
+    response_model=RecommendationHistoryItem,
+)
+def update_tuning_recommendation_status(
+    recommendation_id: str,
+    body: RecommendationStatusUpdate,
+) -> RecommendationHistoryItem:
+    store = get_recommendation_store()
+    try:
+        updated = store.update_status(recommendation_id, body.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    return _history_item(updated)
