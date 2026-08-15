@@ -36,6 +36,12 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://prod.artifactory.nfcu.net/artifactory/api/pypi/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-prod.artifactory.nfcu.net}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
     image: edim-dde-api:local
     container_name: edim-dde-api
     ports:
