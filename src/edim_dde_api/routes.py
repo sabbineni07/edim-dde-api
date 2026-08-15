@@ -18,6 +18,7 @@ from edim_dde_ai.recommendations import (
 )
 from edim_dde_ai.retrieval import get_retrieval_provider, provider_for_corpus
 from edim_dde_ai.store import get_state_store
+from edim_dde_ai.web import get_web_search_provider
 from edim_dde_domain.errors import (
     DatabricksNotConfiguredError,
     DomainToolError,
@@ -126,6 +127,7 @@ def health() -> dict[str, Any]:
     obs = get_observability_provider()
     store = get_state_store()
     retrieval = get_retrieval_provider()
+    web_search = get_web_search_provider()
     rec_store = get_recommendation_store()
     return {
         "status": "ok",
@@ -135,6 +137,7 @@ def health() -> dict[str, Any]:
         "state_store": getattr(store, "name", "unknown"),
         "recommendation_store": getattr(rec_store, "name", "unknown"),
         "retrieval": getattr(retrieval, "name", "unknown"),
+        "web_search": getattr(web_search, "name", "unknown"),
     }
 
 
@@ -226,7 +229,8 @@ async def analyze_rca(
             lambda: agent.invoke(payload, config=config),
             request_id=rid,
         )
-        return rca_response_from_agent_state(final)
+        response = rca_response_from_agent_state(final)
+        return _persist_rca_recommendation(body, response, request_id=rid)
     except ValueError as exc:
         raise _http_from_exc(
             status_code=500,
@@ -297,6 +301,88 @@ async def recommend_cluster(
             detail=safe_exc_message(exc),
         ) from exc
 
+def _bounded_rca_store_response(response: RcaResponse) -> dict[str, Any]:
+    """Persist diagnosis fields + a compact evidence snapshot for experience indexing.
+
+    Full evidence packs and regenerated prompt context strings are omitted so
+    RecommendationStore rows stay bounded for Cosmos/Redis deployments.
+    """
+    payload = response.model_dump(
+        exclude={
+            "runbook_context",
+            "historical_context",
+            "web_search_context",
+            "web_search_hits",
+            "recommendation_id",
+            "recommendation_status",
+        }
+    )
+    pack = response.evidence_pack if isinstance(response.evidence_pack, dict) else {}
+    evidence_items: list[dict[str, Any]] = []
+    for item in (pack.get("evidence") or [])[:20]:
+        if not isinstance(item, dict):
+            continue
+        evidence_items.append(
+            {
+                "ref": item.get("ref"),
+                "source": item.get("source"),
+                "excerpt": str(item.get("excerpt") or "")[:500],
+            }
+        )
+    sections = pack.get("sections") if isinstance(pack.get("sections"), dict) else {}
+    compact_sections: dict[str, Any] = {}
+    for key, value in sections.items():
+        text = str(value or "")
+        compact_sections[key] = text[:2000]
+    payload["evidence_pack"] = {
+        "job_id": pack.get("job_id"),
+        "job_run_id": pack.get("job_run_id"),
+        "raw_anchors": pack.get("raw_anchors") or {},
+        "sections": compact_sections,
+        "evidence": evidence_items,
+    }
+    return payload
+
+
+def _persist_rca_recommendation(
+    body: RcaRequest,
+    response: RcaResponse,
+    *,
+    request_id: str,
+) -> RcaResponse:
+    """Persist RCA diagnosis/actions through the shared lifecycle store."""
+    store = get_recommendation_store()
+    if getattr(store, "name", "") == "none":
+        return response
+    try:
+        rec_id = new_recommendation_id()
+        record = RecommendationRecord(
+            recommendation_id=rec_id,
+            agent_id="spark_rca",
+            status="proposed",
+            job_id=response.job_id or body.job_id,
+            job_run_id=response.job_run_id or body.job_run_id,
+            request_id=request_id,
+            env=os.environ.get("EDIM_ENV"),
+            request=body.model_dump(exclude={"evidence_pack"}),
+            response=_bounded_rca_store_response(response),
+        )
+        store.save(record)
+        return response.model_copy(
+            update={
+                "recommendation_id": rec_id,
+                "recommendation_status": "proposed",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            logger,
+            "spark_rca recommendation persist failed",
+            exc,
+            level=logging.WARNING,
+        )
+        return response
+
 
 def _persist_tuning_recommendation(
     body: TuningRequest,
@@ -356,6 +442,62 @@ def _history_item(record: RecommendationRecord) -> RecommendationHistoryItem:
     )
 
 
+def _record_for_agent(
+    recommendation_id: str, agent_id: str
+) -> RecommendationRecord:
+    row = get_recommendation_store().get(recommendation_id)
+    if row is None or row.agent_id != agent_id:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    return row
+
+
+@api_v1.get(
+    "/rca/recommendations",
+    response_model=list[RecommendationHistoryItem],
+)
+def list_rca_recommendations(
+    job_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[RecommendationHistoryItem]:
+    """List persisted RCA diagnoses/actions (newest first)."""
+    rows = get_recommendation_store().list(
+        job_id=job_id,
+        status=status,
+        agent_id="spark_rca",
+        limit=limit,
+    )
+    return [_history_item(row) for row in rows]
+
+
+@api_v1.get(
+    "/rca/recommendations/{recommendation_id}",
+    response_model=RecommendationHistoryItem,
+)
+def get_rca_recommendation(recommendation_id: str) -> RecommendationHistoryItem:
+    return _history_item(_record_for_agent(recommendation_id, "spark_rca"))
+
+
+@api_v1.patch(
+    "/rca/recommendations/{recommendation_id}",
+    response_model=RecommendationHistoryItem,
+)
+def update_rca_recommendation_status(
+    recommendation_id: str,
+    body: RecommendationStatusUpdate,
+) -> RecommendationHistoryItem:
+    _record_for_agent(recommendation_id, "spark_rca")
+    try:
+        updated = get_recommendation_store().update_status(
+            recommendation_id, body.status
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    return _history_item(updated)
+
+
 @api_v1.get(
     "/cluster_tuning/recommendations",
     response_model=list[RecommendationHistoryItem],
@@ -383,11 +525,7 @@ def list_tuning_recommendations(
     response_model=RecommendationHistoryItem,
 )
 def get_tuning_recommendation(recommendation_id: str) -> RecommendationHistoryItem:
-    store = get_recommendation_store()
-    row = store.get(recommendation_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="recommendation not found")
-    return _history_item(row)
+    return _history_item(_record_for_agent(recommendation_id, "cluster_tuning"))
 
 
 @api_v1.patch(
@@ -398,6 +536,7 @@ def update_tuning_recommendation_status(
     recommendation_id: str,
     body: RecommendationStatusUpdate,
 ) -> RecommendationHistoryItem:
+    _record_for_agent(recommendation_id, "cluster_tuning")
     store = get_recommendation_store()
     try:
         updated = store.update_status(recommendation_id, body.status)

@@ -6,6 +6,11 @@
 - **Breaking:** `POST /api/v1/recommendations` → `POST /api/v1/cluster_tuning/recommend` (hard cutover; old path returns 404)
 
 ### Added
+- **Spark RCA lifecycle** — best-effort persistence on `POST /rca/analyze`;
+  agent-scoped `GET/PATCH /rca/recommendations`; response lifecycle id/status
+- `RcaResponse.quality`, possible causes, context assessment, runbook/history,
+  optional web-search context, and explicit model-vs-evaluator confidence
+- API lifespan configuration for optional `EDIM_WEB_SEARCH=none|http_json`
 - `TuningResponse.sizing_attempts` / `guardrail_retries` — how many sizing LLM calls / re-prompts ran (guardrail retry loop)
 - `TuningResponse.performance_validation` — rule-based peak-load fitness after sizing
 - **Recommendation history** — lifespan `configure_recommendation_store_from_env`; best-effort persist on `POST …/cluster_tuning/recommend`; `GET/PATCH …/cluster_tuning/recommendations`; `/health.recommendation_store`

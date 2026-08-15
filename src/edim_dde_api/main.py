@@ -9,6 +9,7 @@ from edim_dde_ai import (
     configure_observability_from_env,
     configure_retrieval_from_env,
     configure_state_store_from_env,
+    configure_web_search_from_env,
     set_llm_provider,
     sync_registered_agents_to_store,
 )
@@ -119,6 +120,17 @@ async def lifespan(_app: FastAPI):
         log_exception_once(
             log,
             "Retrieval configure failed; continuing with none",
+            exc,
+            level=logging.WARNING,
+        )
+
+    # Optional public-web enrichment: EDIM_WEB_SEARCH=none|http_json.
+    try:
+        configure_web_search_from_env()
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            log,
+            "Web search configure failed; continuing with none",
             exc,
             level=logging.WARNING,
         )

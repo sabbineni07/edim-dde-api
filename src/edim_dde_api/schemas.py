@@ -25,6 +25,9 @@ class RootCause(BaseModel):
     category: str
     summary: str
     confidence: float
+    model_confidence: Optional[float] = Field(
+        None, description="LLM/rule estimate; use response.quality.confidence for rubric evidence completeness"
+    )
     confidence_label: Optional[str] = None
     failure_signature: Optional[str] = None
 
@@ -42,11 +45,24 @@ class RcaResponse(BaseModel):
     recommended_actions: list[str] = Field(default_factory=list)
     contributing_factors: list[str] = Field(default_factory=list)
     evidence_analysis: dict[str, Any] = Field(default_factory=dict)
+    possible_causes: list[dict[str, Any]] = Field(default_factory=list)
+    context_assessment: dict[str, Any] = Field(default_factory=dict)
     recommendations: dict[str, Any] = Field(default_factory=dict)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     classification_hint: dict[str, Any] = Field(default_factory=dict)
     evidence_pack: Optional[dict[str, Any]] = None
+    runbook_context: Optional[str] = None
+    historical_context: Optional[str] = None
+    web_search_context: Optional[str] = None
+    web_search_hits: list[dict[str, Any]] = Field(default_factory=list)
+    quality: dict[str, Any] = Field(default_factory=dict)
+    recommendation_id: Optional[str] = Field(
+        None, description="Persisted RCA lifecycle record id when enabled"
+    )
+    recommendation_status: Optional[str] = Field(
+        None, description="Lifecycle status when persisted (initially proposed)"
+    )
 
 
 class KnowledgeIngestRequest(BaseModel):

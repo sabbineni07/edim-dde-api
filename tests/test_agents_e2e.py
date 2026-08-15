@@ -90,6 +90,7 @@ def test_health_http(client: TestClient):
     assert body["status"] == "ok"
     assert "cluster_tuning" in body["agents"]
     assert "spark_rca" in body["agents"]
+    assert body["web_search"] in {"none", "memory", "http_json"}
 
 
 def test_cluster_tuning_recommend_v1_http(client: TestClient):
@@ -170,6 +171,36 @@ def test_rca_analyze_v1_http(client: TestClient):
     assert body["status"] == "completed"
     assert body["root_cause"]["category"] == "resource"
     assert "recommended_actions" in body
+    assert body["quality"]["evaluator"] == "spark_rca.quality"
+    assert body["recommendation_status"] == "proposed"
+    rid = body["recommendation_id"]
+    assert rid
+    listed = client.get(
+        "/api/v1/rca/recommendations", params={"job_id": "j-1"}
+    )
+    assert listed.status_code == 200
+    assert any(row["recommendation_id"] == rid for row in listed.json())
+    got = client.get(f"/api/v1/rca/recommendations/{rid}")
+    assert got.status_code == 200
+    assert got.json()["agent_id"] == "spark_rca"
+    stored = got.json()["response"]
+    assert "runbook_context" not in stored
+    assert "historical_context" not in stored
+    assert "web_search_hits" not in stored
+    pack = stored["evidence_pack"]
+    assert pack["raw_anchors"]["failure_reason"]
+    assert pack["evidence"][0]["ref"] == "e1"
+    patched = client.patch(
+        f"/api/v1/rca/recommendations/{rid}",
+        json={"status": "applied"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["status"] == "applied"
+    # Agent-scoped routes cannot read a different agent's lifecycle record.
+    assert (
+        client.get(f"/api/v1/cluster_tuning/recommendations/{rid}").status_code
+        == 404
+    )
     # Must not leak full agent state keys
     assert "sizing_raw" not in body
     assert "llm_raw" not in body
