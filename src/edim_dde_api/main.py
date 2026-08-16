@@ -1,4 +1,20 @@
-"""FastAPI application entrypoint."""
+"""FastAPI application entrypoint.
+
+Business purpose
+----------------
+Compose the EDIM DDE HTTP host: lifespan wiring for Key Vault, observability,
+state/recommendation/retrieval/web-search planes, domain agent bootstrap, and
+a lazy Foundry LLM provider. Exposes OpenAPI as ``EDIM DDE API`` with CORS,
+request-id / Apps-token middleware, versioned routes, and optional local guide.
+
+Public API / endpoint groups
+----------------------------
+* ``app`` — ASGI application (uvicorn target ``edim_dde_api.main:app``)
+* ``lifespan`` — startup/shutdown context for plane configuration + bootstrap
+* Exception handlers — ``FoundryLLMNotConfiguredError`` / ``ChainInvokerError`` → 503
+* ``main`` — local uvicorn launcher (host ``0.0.0.0:8080``, reload)
+* Mounted routes — ``/health``, ``/api/v1/*`` (see ``routes``), ``/guide/``
+"""
 
 from __future__ import annotations
 
@@ -37,6 +53,9 @@ def _cors_origins() -> list[str]:
     Empty (default) disables cross-origin browser access. Never combine
     ``allow_origins=["*"]`` with credentials — Starlette would reflect any
     request Origin.
+
+    Returns:
+        List of trimmed origin URLs, or empty when env is unset/blank.
     """
     raw = os.environ.get("EDIM_CORS_ORIGINS", "").strip()
     if not raw:
@@ -46,6 +65,19 @@ def _cors_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """Configure planes, bootstrap agents, then yield until shutdown.
+
+    Failures in optional planes (Key Vault, observability, stores, retrieval,
+    web search, catalog sync) are logged and swallowed so ``/health`` remains
+    reachable. ``EDIM_STRICT_STARTUP=1`` can fail fast via domain env validation.
+    LLM provider is set lazily so health works before Foundry env is complete.
+
+    Args:
+        _app: FastAPI instance (unused; required by FastAPI lifespan signature).
+
+    Yields:
+        Control to the running application until process shutdown.
+    """
     import logging
 
     log = logging.getLogger(__name__)
@@ -172,6 +204,15 @@ async def lifespan(_app: FastAPI):
             *,
             config: dict | None = None,
         ) -> str:
+            """Delegate to the cached Foundry provider.
+
+            Args:
+                messages: Chat-style ``(role, content)`` pairs.
+                config: Optional invoke config forwarded to the provider.
+
+            Returns:
+                Model completion text from Foundry.
+            """
             return get_foundry_llm_provider().invoke(messages, config=config)
 
     set_llm_provider(_LazyFoundry())
@@ -207,7 +248,17 @@ mount_guide(app)
 async def foundry_not_configured_handler(
     _request: Request, exc: FoundryLLMNotConfiguredError
 ) -> JSONResponse:
-    # Logged once here (not also in routes) — bubbles from Foundry provider.
+    """Map missing Foundry LLM config to HTTP 503 with a stable error code.
+
+    Logged once here (not also in routes) — bubbles from Foundry provider.
+
+    Args:
+        _request: Incoming request (unused).
+        exc: Domain error indicating Foundry credentials / endpoint are unset.
+
+    Returns:
+        JSON ``503`` with ``error_code=FOUNDRY_LLM_NOT_CONFIGURED``.
+    """
     import logging
 
     log_exception_once(
@@ -229,6 +280,15 @@ async def foundry_not_configured_handler(
 async def chain_invoker_handler(
     _request: Request, exc: ChainInvokerError
 ) -> JSONResponse:
+    """Map LLM chain invoke failures to HTTP 503 without leaking internals.
+
+    Args:
+        _request: Incoming request (unused).
+        exc: Framework error from the LLM chain invoker.
+
+    Returns:
+        JSON ``503`` with generic detail and ``error_code=LLM_CHAIN_ERROR``.
+    """
     import logging
 
     log_exception_once(
@@ -246,6 +306,7 @@ async def chain_invoker_handler(
 
 
 def main() -> None:
+    """Run uvicorn against this module for local development (reload enabled)."""
     import uvicorn
 
     uvicorn.run("edim_dde_api.main:app", host="0.0.0.0", port=8080, reload=True)

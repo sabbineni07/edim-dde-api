@@ -1,9 +1,15 @@
 """Local Docker / laptop engineer guide via MkDocs Material static site.
 
-Not deployed to Databricks Apps. Build with ``make guide-site`` (or
-``make vendor-wheels``), then open ``http://127.0.0.1:8080/guide/``.
+Business purpose
+----------------
+Serve the MkDocs-built engineer guide at ``/guide/`` for local and Docker
+development. Intentionally **not** mounted on Databricks Apps (detected via
+``DATABRICKS_APP_PORT``). Build with ``make guide-site`` (or ``make vendor-wheels``).
 
-Material theme provides sidebar nav + Previous / Next from ``mkdocs.yml``.
+Public API
+----------
+* ``resolve_guide_site_dir`` — locate built ``site/`` if present
+* ``mount_guide`` — attach StaticFiles at ``/guide`` when a site exists
 """
 
 from __future__ import annotations
@@ -19,7 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_guide_site_dir() -> Path | None:
-    """Return built MkDocs ``site/`` directory if present."""
+    """Return built MkDocs ``site/`` directory if present.
+
+    Search order: ``EDIM_GUIDE_SITE_DIR``, Docker vendor path under the API
+    package, then editable ``edim-dde-domain/site``. Returns ``None`` on Apps
+    runtime or when no ``index.html`` is found.
+
+    Returns:
+        Absolute path to a directory containing ``index.html``, or ``None``.
+    """
     if (os.environ.get("DATABRICKS_APP_PORT") or "").strip():
         return None
 
@@ -41,7 +55,14 @@ def resolve_guide_site_dir() -> Path | None:
 
 
 def mount_guide(app: FastAPI) -> None:
-    """Mount MkDocs static site at ``/guide`` when available."""
+    """Mount MkDocs static site at ``/guide`` when available.
+
+    Args:
+        app: FastAPI application to attach the StaticFiles mount to.
+
+    Returns:
+        None. Logs info whether the guide was mounted or skipped.
+    """
     site = resolve_guide_site_dir()
     if site is None:
         logger.info(
