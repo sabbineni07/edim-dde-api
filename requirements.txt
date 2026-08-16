@@ -1,5 +1,5 @@
 # Runtime deps (sibling editable checkouts for local development):
--e ../edim-dde-ai
+-e ../edim-dde-ai[azure-search,cosmos]
 -e ../edim-dde-domain[azure,databricks,llm]
 fastapi>=0.115
 uvicorn[standard]>=0.30

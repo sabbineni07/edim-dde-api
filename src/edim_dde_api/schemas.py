@@ -86,7 +86,11 @@ class RcaResponse(BaseModel):
         context_assessment: Runbook / history / web context summary.
         recommendations: Structured recommendation payload for operators.
         timeline: Chronological events from the run.
-        evidence: Evidence items surfaced to the client.
+        evidence: Evidence items surfaced to the client. Each item carries a
+            ``backfilled`` flag; when the model cited nothing resolvable these
+            are labeled pack-preview rows, not model citations.
+        evidence_backfilled: True when ``evidence`` holds pack preview rows the
+            model did not cite (never a silent substitution).
         classification_hint: Early classification signals from the graph.
         evidence_pack: Full or gathered evidence pack (client receives full).
         runbook_context / historical_context / web_search_*: Enrichment strings
@@ -111,6 +115,13 @@ class RcaResponse(BaseModel):
     recommendations: dict[str, Any] = Field(default_factory=dict)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_backfilled: bool = Field(
+        False,
+        description=(
+            "True when `evidence` holds labeled pack-preview rows the model did "
+            "not cite (never a silent citation substitution)."
+        ),
+    )
     classification_hint: dict[str, Any] = Field(default_factory=dict)
     evidence_pack: Optional[dict[str, Any]] = None
     runbook_context: Optional[str] = None
