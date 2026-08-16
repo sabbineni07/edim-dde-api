@@ -243,6 +243,8 @@ class TuningResponse(BaseModel):
         explanation: Optional human narrative when requested.
         recommendation_id / recommendation_status: Lifecycle fields when
             RecommendationStore persist succeeds.
+        quality: Deterministic ``cluster_tuning.quality`` rubric snapshot
+            (score / confidence / dimensions) when evaluation succeeds.
     """
 
     request_id: Optional[str] = None
@@ -269,6 +271,10 @@ class TuningResponse(BaseModel):
         None,
         description="Lifecycle status when persisted (e.g. proposed)",
     )
+    quality: dict[str, Any] = Field(
+        default_factory=dict,
+        description="cluster_tuning.quality rubric snapshot when evaluated",
+    )
 
 
 class RecommendationStatusUpdate(BaseModel):
@@ -277,12 +283,32 @@ class RecommendationStatusUpdate(BaseModel):
     Attributes:
         status: Target status — ``proposed`` | ``accepted`` | ``rejected`` |
             ``applied`` | ``superseded``.
+        human_label: Optional calibration label stored under ``extra.outcome``.
+        labeled_by: Optional actor for the human label.
+        rerun_success: Optional post-change success flag (Quality 2c scaffold).
+        rerun_job_run_id: Optional follow-up run id for the rerun measurement.
     """
 
     status: str = Field(
         ...,
         description="proposed | accepted | rejected | applied | superseded",
         examples=["accepted"],
+    )
+    human_label: Optional[str] = Field(
+        None,
+        description="Optional human calibration label (stored in extra.outcome)",
+    )
+    labeled_by: Optional[str] = Field(
+        None,
+        description="Optional actor for human_label",
+    )
+    rerun_success: Optional[bool] = Field(
+        None,
+        description="Optional post-apply / rerun success flag",
+    )
+    rerun_job_run_id: Optional[str] = Field(
+        None,
+        description="Optional job_run_id for the measured rerun",
     )
 
 
@@ -370,4 +396,5 @@ def tuning_response_from_agent_state(
         explanation=str(final.get("explanation") or ""),
         recommendation_id=final.get("recommendation_id"),
         recommendation_status=final.get("recommendation_status"),
+        quality=dict(final.get("quality") or {}),
     )

@@ -184,6 +184,35 @@ async def lifespan(_app: FastAPI):
 
     bootstrap_agents()
 
+    # Optional bindings.cosmos → reconfigure Cosmos StateStore + RecommendationStore
+    # with agent-declared endpoint/database (key stays EDIM_COSMOS_KEY).
+    try:
+        from edim_dde_ai.core.bindings import collect_cosmos_configure_kwargs
+        from edim_dde_ai.store.registry import resolve_state_store_name
+        from edim_dde_ai.recommendations.registry import (
+            resolve_recommendation_store_name,
+        )
+
+        cosmos_kw = collect_cosmos_configure_kwargs()
+        if cosmos_kw:
+            if resolve_state_store_name() == "cosmos":
+                configure_state_store_from_env(**cosmos_kw)
+            if resolve_recommendation_store_name() == "cosmos":
+                from edim_dde_ai import configure_recommendation_store_from_env
+
+                configure_recommendation_store_from_env(**cosmos_kw)
+            log.info(
+                "Applied bindings.cosmos overrides to store configure: %s",
+                sorted(cosmos_kw.keys()),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            log,
+            "Cosmos bindings apply failed; keeping process store config",
+            exc,
+            level=logging.WARNING,
+        )
+
     # Mirror Git-loaded agent YAML metadata into the durable catalog (if any).
     try:
         sync_registered_agents_to_store(actor="api-lifespan")

@@ -384,6 +384,7 @@ async def recommend_cluster(
             request_id=rid,
         )
         response = tuning_response_from_agent_state(final, request_id=rid)
+        response = _attach_tuning_quality(final, response)
         response = _persist_tuning_recommendation(body, response, request_id=rid)
         return response
     except NoJobMetricsError as exc:
@@ -518,6 +519,46 @@ def _persist_rca_recommendation(
         log_exception_once(
             logger,
             "spark_rca recommendation persist failed",
+            exc,
+            level=logging.WARNING,
+        )
+        return response
+
+
+def _attach_tuning_quality(
+    final: dict[str, Any], response: TuningResponse
+) -> TuningResponse:
+    """Best-effort ``cluster_tuning.quality`` so store rows can be correlated.
+
+    Mirrors RCA's in-graph evaluate: score the recommendation against metrics /
+    historical context. Failures are logged and the HTTP success path continues
+    without ``quality`` (same as missing quality on older rows).
+
+    Args:
+        final: Agent state after invoke (metrics / historical_context).
+        response: Projected HTTP response.
+
+    Returns:
+        Response with ``quality`` filled when evaluation succeeds.
+    """
+    if response.quality:
+        return response
+    try:
+        from edim_dde_ai.evaluation import evaluate
+
+        result = evaluate(
+            "cluster_tuning.quality",
+            inputs={"metrics": final.get("metrics") or response.job_cluster_metrics},
+            output={"recommendation": response.recommendation},
+            context={
+                "historical_context": final.get("historical_context"),
+            },
+        )
+        return response.model_copy(update={"quality": result.to_dict()})
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            logger,
+            "cluster_tuning quality evaluate failed",
             exc,
             level=logging.WARNING,
         )
@@ -676,6 +717,34 @@ def get_rca_recommendation(recommendation_id: str) -> RecommendationHistoryItem:
     return _history_item(_record_for_agent(recommendation_id, "spark_rca"))
 
 
+def _apply_status_and_outcome(
+    recommendation_id: str,
+    body: RecommendationStatusUpdate,
+) -> RecommendationRecord:
+    """Update lifecycle status and optionally merge outcome scaffolding."""
+    store = get_recommendation_store()
+    updated = store.update_status(recommendation_id, body.status)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="recommendation not found")
+    if (
+        body.human_label is None
+        and body.rerun_success is None
+        and body.rerun_job_run_id is None
+    ):
+        return updated
+    from edim_dde_domain.evaluation.correlation import merge_outcome_extra
+
+    merged_extra = merge_outcome_extra(
+        updated.extra,
+        human_label=body.human_label,
+        labeled_by=body.labeled_by,
+        rerun_success=body.rerun_success,
+        rerun_job_run_id=body.rerun_job_run_id,
+    )
+    updated.extra = merged_extra
+    return store.save(updated)
+
+
 @api_v1.patch(
     "/rca/recommendations/{recommendation_id}",
     response_model=RecommendationHistoryItem,
@@ -690,23 +759,21 @@ def update_rca_recommendation_status(
         ``PATCH /api/v1/rca/recommendations/{recommendation_id}`` → ``200`` updated
         item, ``400`` invalid status transition, ``404`` missing / wrong agent.
         Accepted/applied statuses enable cross-job experience indexing.
+        Optional ``human_label`` / ``rerun_success`` fields scaffold Quality 2c
+        calibration under ``extra.outcome``.
 
     Args:
         recommendation_id: Lifecycle record id.
-        body: Target ``status`` value.
+        body: Target ``status`` value (+ optional outcome fields).
 
     Returns:
         Updated ``RecommendationHistoryItem``.
     """
     _record_for_agent(recommendation_id, "spark_rca")
     try:
-        updated = get_recommendation_store().update_status(
-            recommendation_id, body.status
-        )
+        updated = _apply_status_and_outcome(recommendation_id, body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if updated is None:
-        raise HTTPException(status_code=404, detail="recommendation not found")
     return _history_item(updated)
 
 
@@ -779,20 +846,18 @@ def update_tuning_recommendation_status(
     HTTP:
         ``PATCH /api/v1/cluster_tuning/recommendations/{recommendation_id}`` →
         ``200`` updated item, ``400`` invalid transition, ``404`` missing / wrong agent.
+        Optional ``human_label`` / ``rerun_success`` scaffold Quality 2c calibration.
 
     Args:
         recommendation_id: Lifecycle record id.
-        body: Target ``status`` value.
+        body: Target ``status`` value (+ optional outcome fields).
 
     Returns:
         Updated ``RecommendationHistoryItem``.
     """
     _record_for_agent(recommendation_id, "cluster_tuning")
-    store = get_recommendation_store()
     try:
-        updated = store.update_status(recommendation_id, body.status)
+        updated = _apply_status_and_outcome(recommendation_id, body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if updated is None:
-        raise HTTPException(status_code=404, detail="recommendation not found")
     return _history_item(updated)
