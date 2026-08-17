@@ -29,7 +29,8 @@ class RcaRequest(BaseModel):
         job_id: Optional parent job id (improves history / experience lookup).
         job_run_date: Optional run date (YYYY-MM-DD) for SQL windowing.
         task_key: Optional multi-task job task key when diagnosing one task.
-        workspace_id: Optional workspace scope for multi-workspace deployments.
+        workspace_id: Optional within-env workspace for warehouse/UC FQNs
+            (must belong to process ``EDIM_ENV``; never cross-env).
         error_text: Optional failure text for classification with evidence.
         evidence_pack: Optional pre-built evidence; otherwise agent gathers via SQL.
     """
@@ -192,6 +193,8 @@ class TuningRequest(BaseModel):
         cluster_id: Current / target cluster id for metrics and comparison.
         job_run_id: Optional specific run to anchor the recommendation.
         start_date / end_date: Optional ``job_run_date`` bounds (YYYY-MM-DD).
+        workspace_id: Optional within-env workspace for warehouse/UC FQNs
+            (must belong to process ``EDIM_ENV``; see workspace resolver).
         include_explanation: When true, agent may populate ``explanation``.
         metrics: Optional metrics override; otherwise domain SQL reads Databricks.
     """
@@ -204,6 +207,14 @@ class TuningRequest(BaseModel):
     )
     end_date: Optional[str] = Field(
         None, description="Optional upper bound on job_run_date (YYYY-MM-DD)"
+    )
+    workspace_id: Optional[str] = Field(
+        None,
+        description=(
+            "Within-env Databricks workspace id (e.g. dev_1). "
+            "Never resolves across EDIM_ENV boundaries."
+        ),
+        examples=["dev_1"],
     )
     include_explanation: bool = False
     metrics: Optional[dict[str, Any]] = Field(
