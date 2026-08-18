@@ -12,6 +12,7 @@ Public API / endpoint groups
 * Cluster tuning — ``TuningRequest``, ``TuningResponse``, ``tuning_response_from_agent_state``
 * Knowledge — ``KnowledgeIngestRequest``, ``KnowledgeIngestResponse``
 * Recommendation history — ``RecommendationStatusUpdate``, ``RecommendationHistoryItem``
+* HITL sessions — ``SessionStartRequest``, ``HitlResumeRequest``, ``SessionResponse``
 """
 
 from __future__ import annotations
@@ -409,3 +410,39 @@ def tuning_response_from_agent_state(
         recommendation_status=final.get("recommendation_status"),
         quality=dict(final.get("quality") or {}),
     )
+
+
+class SessionStartRequest(BaseModel):
+    """POST ``/api/v1/sessions`` — start an agent run that may pause at HITL."""
+
+    agent_id: str = Field(..., examples=["hitl_demo"])
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
+class HitlResumeRequest(BaseModel):
+    """POST ``/api/v1/sessions/{session_id}/resume`` body."""
+
+    decision: str = Field(
+        ...,
+        description="approved | rejected | modified",
+        examples=["approved"],
+    )
+    comment: Optional[str] = None
+    patch: Optional[dict[str, Any]] = Field(
+        None,
+        description="Optional state keys to merge (typical for modified)",
+    )
+    actor: Optional[str] = None
+
+
+class SessionResponse(BaseModel):
+    """HITL / session snapshot returned by start, get, and resume."""
+
+    session_id: Optional[str] = None
+    agent_id: str
+    status: str
+    hitl_prompt: Optional[str] = None
+    hitl_gate_id: Optional[str] = None
+    hitl_decision: Optional[str] = None
+    request_id: Optional[str] = None
+    state: dict[str, Any] = Field(default_factory=dict)

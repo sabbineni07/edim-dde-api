@@ -15,6 +15,7 @@ Public API / endpoint groups
   - Debug — ``GET /debug/sql-auth``
   - RCA — ``POST /rca/analyze``, recommendation list/get/patch
   - Cluster tuning — ``POST /cluster_tuning/recommend``, recommendation list/get/patch
+  - HITL — ``POST /sessions``, ``GET /sessions/{id}``, ``POST /sessions/{id}/resume``
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from edim_dde_ai import create_agent, list_agents
+from edim_dde_ai.errors import HitlError
+from edim_dde_ai.hitl import STATUS_WAITING, resume_hitl_session
 from edim_dde_ai.observability import build_run_config, get_observability_provider
 from edim_dde_ai.recommendations import (
     RecommendationRecord,
@@ -34,7 +37,7 @@ from edim_dde_ai.recommendations import (
     new_recommendation_id,
 )
 from edim_dde_ai.retrieval import get_retrieval_provider, provider_for_corpus
-from edim_dde_ai.store import get_state_store
+from edim_dde_ai.store import SessionRecord, get_state_store
 from edim_dde_ai.web import get_web_search_provider
 from edim_dde_domain.errors import (
     DatabricksNotConfiguredError,
@@ -64,6 +67,9 @@ from edim_dde_api.schemas import (
     RcaResponse,
     RecommendationHistoryItem,
     RecommendationStatusUpdate,
+    SessionResponse,
+    SessionStartRequest,
+    HitlResumeRequest,
     TuningRequest,
     TuningResponse,
     rca_response_from_agent_state,
@@ -194,6 +200,160 @@ def health() -> dict[str, Any]:
         "retrieval": getattr(retrieval, "name", "unknown"),
         "web_search": getattr(web_search, "name", "unknown"),
     }
+
+
+def _normalize_http_session_status(status: str) -> str:
+    """Map in-graph HITL status onto the HTTP session contract."""
+    if status in {"resumed", "closed"}:
+        return "closed"
+    return status
+
+
+def _session_response(
+    *,
+    agent_id: str,
+    state: dict[str, Any],
+    request_id: str | None = None,
+    status_override: str | None = None,
+) -> SessionResponse:
+    """Project flat agent / session state into ``SessionResponse``."""
+    status = status_override or str(state.get("hitl_status") or "completed")
+    status = _normalize_http_session_status(status)
+    return SessionResponse(
+        session_id=state.get("session_id"),
+        agent_id=agent_id,
+        status=status,
+        hitl_prompt=state.get("hitl_prompt"),
+        hitl_gate_id=state.get("hitl_gate_id"),
+        hitl_decision=state.get("hitl_decision"),
+        request_id=request_id or state.get("request_id"),
+        state=state,
+    )
+
+
+def _session_response_from_record(rec: SessionRecord) -> SessionResponse:
+    """Project a persisted ``SessionRecord`` into ``SessionResponse``."""
+    state = dict(rec.state or {})
+    extra = rec.extra or {}
+    return SessionResponse(
+        session_id=rec.session_id,
+        agent_id=rec.agent_id,
+        status=rec.status,
+        hitl_prompt=extra.get("prompt") or state.get("hitl_prompt"),
+        hitl_gate_id=extra.get("gate_id") or state.get("hitl_gate_id"),
+        hitl_decision=state.get("hitl_decision"),
+        request_id=rec.request_id,
+        state=state,
+    )
+
+
+@api_v1.post("/sessions", response_model=SessionResponse)
+async def start_session(
+    request: Request,
+    body: SessionStartRequest,
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> SessionResponse:
+    """Invoke an agent, persisting a HITL session when a ``hitl.gate`` pauses.
+
+    HTTP:
+        ``POST /api/v1/sessions`` → ``200`` with ``status=waiting_hitl`` or
+        ``completed`` (no gate / skipped), ``404`` unknown agent.
+
+    Args:
+        request: Incoming request (token + request id binding).
+        body: ``agent_id`` and flat ``state``.
+        x_request_id: Optional correlation header.
+
+    Returns:
+        ``SessionResponse`` including ``session_id`` when paused.
+    """
+    if body.agent_id not in list_agents():
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {body.agent_id}")
+    rid = _request_id(request, x_request_id)
+    payload = dict(body.state or {})
+    payload.setdefault("request_id", rid)
+    config = build_run_config(agent_id=body.agent_id, request_id=rid)
+    agent = create_agent(body.agent_id)
+    final = await _invoke_agent_in_thread(
+        request,
+        lambda: agent.invoke(payload, config=config),
+        request_id=rid,
+    )
+    status = str(final.get("hitl_status") or "completed")
+    return _session_response(
+        agent_id=body.agent_id,
+        state=final,
+        request_id=rid,
+        status_override=status if status == "waiting_hitl" else "completed",
+    )
+
+
+@api_v1.get("/sessions/{session_id}", response_model=SessionResponse)
+def get_session(session_id: str) -> SessionResponse:
+    """Fetch a persisted HITL / control-plane session.
+
+    HTTP:
+        ``GET /api/v1/sessions/{session_id}`` → ``200`` or ``404``.
+    """
+    rec = get_state_store().get_session(session_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    return _session_response_from_record(rec)
+
+
+@api_v1.post("/sessions/{session_id}/resume", response_model=SessionResponse)
+async def resume_session(
+    request: Request,
+    session_id: str,
+    body: HitlResumeRequest,
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> SessionResponse:
+    """Apply a human decision and continue a ``waiting_hitl`` session.
+
+    HTTP:
+        ``POST /api/v1/sessions/{session_id}/resume`` → ``200`` completed or
+        paused again, ``400`` bad decision, ``404`` missing, ``409`` not waiting.
+
+    Args:
+        request: Incoming request.
+        session_id: StateStore session key.
+        body: Decision, optional comment/patch/actor.
+        x_request_id: Optional correlation header.
+
+    Returns:
+        ``SessionResponse`` after resume.
+    """
+    rec = get_state_store().get_session(session_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    if rec.status != STATUS_WAITING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session {session_id} is {rec.status}, expected {STATUS_WAITING}",
+        )
+    rid = _request_id(request, x_request_id)
+    try:
+        final = await _invoke_agent_in_thread(
+            request,
+            lambda: resume_hitl_session(
+                session_id,
+                decision=body.decision,
+                comment=body.comment,
+                patch=body.patch,
+                actor=body.actor,
+                request_id=rid,
+            ),
+            request_id=rid,
+        )
+    except HitlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    status = str(final.get("hitl_status") or "closed")
+    return _session_response(
+        agent_id=rec.agent_id,
+        state=final,
+        request_id=rid,
+        status_override=status,
+    )
 
 
 @api_v1.post("/knowledge/ingest", response_model=KnowledgeIngestResponse)

@@ -204,3 +204,38 @@ def test_rca_analyze_v1_http(client: TestClient):
     # Must not leak full agent state keys
     assert "sizing_raw" not in body
     assert "llm_raw" not in body
+
+
+def test_hitl_session_pause_get_resume(client: TestClient):
+    started = client.post(
+        "/api/v1/sessions",
+        json={"agent_id": "hitl_demo", "state": {"name": "alpha"}},
+        headers={"X-Request-Id": "hitl-test-001"},
+    )
+    assert started.status_code == 200, started.text
+    body = started.json()
+    assert body["status"] == "waiting_hitl"
+    assert body["session_id"]
+    assert body["state"]["proposal"] == "resize-alpha"
+    sid = body["session_id"]
+
+    got = client.get(f"/api/v1/sessions/{sid}")
+    assert got.status_code == 200
+    assert got.json()["status"] == "waiting_hitl"
+
+    resumed = client.post(
+        f"/api/v1/sessions/{sid}/resume",
+        json={"decision": "approved", "comment": "ok"},
+        headers={"X-Request-Id": "hitl-test-001"},
+    )
+    assert resumed.status_code == 200, resumed.text
+    out = resumed.json()
+    assert out["status"] == "closed"
+    assert out["state"]["status"] == "done:approved"
+    assert out["state"]["proposal"] == "resize-alpha"
+
+    again = client.post(
+        f"/api/v1/sessions/{sid}/resume",
+        json={"decision": "approved"},
+    )
+    assert again.status_code == 409
