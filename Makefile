@@ -49,9 +49,14 @@ help: ## Show this help
 	@echo "Do not run compose-up and host-run at the same time (both use port 5432 / edim-postgres)."
 
 vendor-wheels: ## Build ai+domain+api wheels + MkDocs guide-site for Docker
+ifeq ($(OS),Windows_NT)
+	@echo "Windows PowerShell wrapper for vendor-wheels (uses Git Bash + .venv python)"
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/build_vendor_wheels.ps1 -GitBashPath "$(GIT_BASH)" -EdimAiPath "$(EDIM_AI_PATH)" -EdimDomainPath "$(EDIM_DOMAIN_PATH)"
+else
 	@if [ -n "$(EDIM_AI_PATH)" ]; then export EDIM_AI_PATH="$(EDIM_AI_PATH)"; fi; \
 	if [ -n "$(EDIM_DOMAIN_PATH)" ]; then export EDIM_DOMAIN_PATH="$(EDIM_DOMAIN_PATH)"; fi; \
 	PYTHON="$(PYTHON)" ./deploy/scripts/build_vendor_wheels.sh
+endif
 
 guide-site: ## Build MkDocs Material site → deploy/docker/guide-site (local /guide only)
 	@if [ -n "$(EDIM_DOMAIN_PATH)" ]; then export EDIM_DOMAIN_PATH="$(EDIM_DOMAIN_PATH)"; fi; \
@@ -93,6 +98,8 @@ compose-up: ## Build & start API + Postgres StateStore
 	@echo "Postgres: localhost:5432  user/db/password = edim/edim/edim"
 	@echo "E2E dry:  make e2e-dry"
 	@echo "Logs:     make compose-logs"
+
+docker-up: compose-up ## Build & Start API + Postgres (keeps postgres volume edim_pg_data)
 
 compose-down: ## Stop API + Postgres (keeps postgres volume edim_pg_data)
 	docker compose down

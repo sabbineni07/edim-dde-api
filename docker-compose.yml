@@ -51,8 +51,11 @@ services:
         required: false
     environment:
       PORT: "8080"
+      # Local containers cannot use the host's az login / azure key vault.
+      AZURE_KEY_VAULT_URL: ""
       EDIM_ENV: ${EDIM_ENV:-dev}
       # Control-plane StateStore → compose Postgres service
+      EDIM_RECOMMENDATION_STORE: postgres
       EDIM_STATE_STORE: postgres
       EDIM_DATABASE_URL: postgresql://edim:edim@postgres:5432/edim
       EDIM_STRICT_STARTUP: ${EDIM_STRICT_STARTUP:-0}
