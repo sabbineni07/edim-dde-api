@@ -26,8 +26,8 @@ if [[ ! -f "$DOMAIN/mkdocs.yml" ]]; then
   exit 1
 fi
 
-echo "==> installing mkdocs-material into: $PYTHON"
-"$PYTHON" -m pip install -q "mkdocs-material>=9.5"
+echo "==> installing mkdocs-material (MkDocs 1.x; do not use MkDocs 2) into: $PYTHON"
+"$PYTHON" -m pip install -q "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10"
 
 echo "==> mkdocs build → $OUT"
 rm -rf "$OUT"

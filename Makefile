@@ -4,7 +4,7 @@
 # Engineer guide: ../edim-dde-domain/docs/api/deploy-and-hosting.md (§5 Apps, §6 Docker)
 # Smoke: ../edim-dde-domain/docs/contribute/live-smoke-test.md
 
-.PHONY: help vendor-wheels vendor-wheels-win guide-site apps-create apps-sync apps-deploy apps-get apps-list \
+.PHONY: help vendor-wheels vendor-wheels-win guide-site guide-site-win copy-guide-site bundle-guide-site-win apps-create apps-sync apps-sync-win apps-deploy apps-deploy-win apps-get apps-list \
 	docker-build docker-run compose-up compose-down compose-ps compose-logs \
 	pg-up pg-down pg-ps pg-wait host-run host-up \
 	e2e-health e2e-dry e2e-local clean-vendor
@@ -12,6 +12,8 @@
 PYTHON ?= python3
 APP_NAME ?= edim-dde-api-dev
 WS_SOURCE ?=
+# Git Bash rewrites /Workspace/... before make.exe sees WS_SOURCE; Windows uses PowerShell wrapper
+DATABRICKS_ENV ?= MSYS2_ARG_CONV_EXCL='*'
 EDIM_AI_PATH ?=
 EDIM_DOMAIN_PATH ?=
 GIT_BASH ?= C:/Program Files/Git/bin/bash.exe
@@ -44,7 +46,7 @@ help: ## Show this help
 	@echo ""
 	@echo "Databricks Apps: make vendor-wheels && make apps-create … (docs §5)"
 	@echo "Local MkDocs guide: make guide-site && make compose-up → http://127.0.0.1:8080/guide/"
-	@echo "Windows PowerShell: make vendor-wheels-win"
+	@echo "Windows PowerShell: make vendor-wheels-win   or   make guide-site (uses .ps1)"
 	@echo ""
 	@echo "Do not run compose-up and host-run at the same time (both use port 5432 / edim-postgres)."
 
@@ -59,8 +61,28 @@ else
 endif
 
 guide-site: ## Build MkDocs Material site → deploy/docker/guide-site (local /guide only)
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/build_guide_site.ps1 -EdimDomainPath "$(EDIM_DOMAIN_PATH)"
+else
 	@if [ -n "$(EDIM_DOMAIN_PATH)" ]; then export EDIM_DOMAIN_PATH="$(EDIM_DOMAIN_PATH)"; fi; \
 	PYTHON="$(PYTHON)" ./deploy/scripts/build_guide_site.sh
+endif
+
+guide-site-win: ## Windows PowerShell MkDocs build (same as make guide-site on Windows)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/build_guide_site.ps1 -EdimDomainPath "$(EDIM_DOMAIN_PATH)"
+
+bundle-guide-site-win: ## Windows: build MkDocs + copy to deploy/databricks-app/guide-site
+	$(MAKE) guide-site-win
+	$(MAKE) copy-guide-site
+
+copy-guide-site: ## Copy deploy/docker/guide-site -> deploy/databricks-app/guide-site (Apps bundle)
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -Command "if (-not (Test-Path 'deploy/docker/guide-site/index.html')) { throw 'Run make guide-site first' }; robocopy deploy/docker/guide-site deploy/databricks-app/guide-site /E /NFL /NDL /NJH /NJS; if ($$LASTEXITCODE -ge 8) { exit $$LASTEXITCODE } else { exit 0 }"
+else
+	@test -f deploy/docker/guide-site/index.html || (echo "error: run make guide-site first" >&2; exit 1)
+	rm -rf deploy/databricks-app/guide-site
+	cp -R deploy/docker/guide-site deploy/databricks-app/guide-site
+endif
 
 vendor-wheels-win: ## Windows PowerShell wrapper for vendor-wheels (uses Git Bash + .venv python)
 	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/build_vendor_wheels.ps1 -GitBashPath "$(GIT_BASH)" -EdimAiPath "$(EDIM_AI_PATH)" -EdimDomainPath "$(EDIM_DOMAIN_PATH)"
@@ -76,12 +98,28 @@ apps-get: ## Get one app (APP_NAME)
 
 apps-sync: ## Upload deploy/databricks-app → WS_SOURCE
 	@test -n "$(WS_SOURCE)" || (echo "error: set WS_SOURCE=/Workspace/.../$(APP_NAME)" >&2; exit 1)
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/databricks_apps.ps1 -Action sync -WsSource "$(WS_SOURCE)" -AppName "$(APP_NAME)"
+else
 	@test -f deploy/databricks-app/requirements.vendor.txt || (echo "error: run make vendor-wheels first" >&2; exit 1)
-	databricks workspace import-dir deploy/databricks-app "$(WS_SOURCE)" --overwrite
+	$(DATABRICKS_ENV) databricks workspace import-dir deploy/databricks-app "$(WS_SOURCE)" --overwrite
+endif
+
+apps-sync-win: ## Windows: same as apps-sync (PowerShell; fixes Git Bash /Workspace path mangling)
+	@test -n "$(WS_SOURCE)" || (echo "error: set WS_SOURCE=/Workspace/.../$(APP_NAME)" >&2; exit 1)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/databricks_apps.ps1 -Action sync -WsSource "$(WS_SOURCE)" -AppName "$(APP_NAME)"
 
 apps-deploy: ## Deploy APP_NAME from WS_SOURCE (SNAPSHOT)
 	@test -n "$(WS_SOURCE)" || (echo "error: set WS_SOURCE=/Workspace/.../$(APP_NAME)" >&2; exit 1)
-	databricks apps deploy "$(APP_NAME)" --source-code-path "$(WS_SOURCE)" --mode SNAPSHOT
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/databricks_apps.ps1 -Action deploy -WsSource "$(WS_SOURCE)" -AppName "$(APP_NAME)"
+else
+	$(DATABRICKS_ENV) databricks apps deploy "$(APP_NAME)" --source-code-path "$(WS_SOURCE)" --mode SNAPSHOT
+endif
+
+apps-deploy-win: ## Windows: same as apps-deploy (PowerShell; fixes Git Bash /Workspace path mangling)
+	@test -n "$(WS_SOURCE)" || (echo "error: set WS_SOURCE=/Workspace/.../$(APP_NAME)" >&2; exit 1)
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/databricks_apps.ps1 -Action deploy -WsSource "$(WS_SOURCE)" -AppName "$(APP_NAME)"
 
 docker-build: ## Build API image only (runs vendor-wheels first)
 	$(MAKE) vendor-wheels
