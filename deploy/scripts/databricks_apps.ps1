@@ -54,9 +54,24 @@ switch ($Action) {
     "deploy" {
         Write-Host "Deploying app $AppName from $wsPath"
         & databricks apps deploy $AppName --source-code-path $wsPath --mode SNAPSHOT
+        if ($LASTEXITCODE -ne 0) {
+            throw "databricks apps deploy failed with exit code $LASTEXITCODE"
+        }
+
+        Write-Host "Stopping app $AppName (reload wheels / guide-site after deploy)"
+        & databricks apps stop $AppName
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "databricks apps stop returned $LASTEXITCODE (app may already be stopped)"
+        }
+
+        Write-Host "Starting app $AppName"
+        & databricks apps start $AppName
+        if ($LASTEXITCODE -ne 0) {
+            throw "databricks apps start failed with exit code $LASTEXITCODE"
+        }
     }
 }
 
-if ($LASTEXITCODE -ne 0) {
-    throw "databricks $Action failed with exit code $LASTEXITCODE"
+if ($Action -eq "sync" -and $LASTEXITCODE -ne 0) {
+    throw "databricks sync failed with exit code $LASTEXITCODE"
 }

@@ -109,12 +109,16 @@ apps-sync-win: ## Windows: same as apps-sync (PowerShell; fixes Git Bash /Worksp
 	@test -n "$(WS_SOURCE)" || (echo "error: set WS_SOURCE=/Workspace/.../$(APP_NAME)" >&2; exit 1)
 	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/databricks_apps.ps1 -Action sync -WsSource "$(WS_SOURCE)" -AppName "$(APP_NAME)"
 
-apps-deploy: ## Deploy APP_NAME from WS_SOURCE (SNAPSHOT)
+apps-deploy: ## Deploy APP_NAME from WS_SOURCE (SNAPSHOT), then stop + start
 	@test -n "$(WS_SOURCE)" || (echo "error: set WS_SOURCE=/Workspace/.../$(APP_NAME)" >&2; exit 1)
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/databricks_apps.ps1 -Action deploy -WsSource "$(WS_SOURCE)" -AppName "$(APP_NAME)"
 else
 	$(DATABRICKS_ENV) databricks apps deploy "$(APP_NAME)" --source-code-path "$(WS_SOURCE)" --mode SNAPSHOT
+	@echo "==> stopping $(APP_NAME) (reload wheels / guide-site after deploy)"
+	-$(DATABRICKS_ENV) databricks apps stop "$(APP_NAME)"
+	@echo "==> starting $(APP_NAME)"
+	$(DATABRICKS_ENV) databricks apps start "$(APP_NAME)"
 endif
 
 apps-deploy-win: ## Windows: same as apps-deploy (PowerShell; fixes Git Bash /Workspace path mangling)

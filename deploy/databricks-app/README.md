@@ -36,6 +36,8 @@ curl -sS "https://<app-url>/health"
 
 **Windows / Git Bash:** `make apps-sync` and `make apps-deploy` use `deploy/scripts/databricks_apps.ps1`, which fixes paths like `C:/Program Files/Git/Workspace/...` → `/Workspace/...`. If sync still fails, run from **PowerShell**, or use `WS_SOURCE=//Workspace/Users/...` in Git Bash.
 
+**After deploy:** `make apps-deploy` stops and starts the App automatically so the runtime picks up new wheels and `guide-site/`.
+
 What is installed: `vendor/*.whl` listed in `requirements.vendor.txt` — **not** package `src/` trees.  
 `vendor/` is gitignored; rebuild before each deploy (or move to a private index — Option C in the guide).
 
