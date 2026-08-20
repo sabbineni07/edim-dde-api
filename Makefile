@@ -77,7 +77,7 @@ bundle-guide-site-win: ## Windows: build MkDocs + copy to deploy/databricks-app/
 
 copy-guide-site: ## Copy deploy/docker/guide-site -> deploy/databricks-app/guide-site (Apps bundle)
 ifeq ($(OS),Windows_NT)
-	powershell -NoProfile -Command "if (-not (Test-Path 'deploy/docker/guide-site/index.html')) { throw 'Run make guide-site first' }; robocopy deploy/docker/guide-site deploy/databricks-app/guide-site /E /NFL /NDL /NJH /NJS; if ($$LASTEXITCODE -ge 8) { exit $$LASTEXITCODE } else { exit 0 }"
+	powershell -NoProfile -ExecutionPolicy Bypass -File deploy/scripts/copy_guide_site.ps1
 else
 	@test -f deploy/docker/guide-site/index.html || (echo "error: run make guide-site first" >&2; exit 1)
 	rm -rf deploy/databricks-app/guide-site
