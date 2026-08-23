@@ -12,7 +12,7 @@ Public API / endpoint groups
 * ``router`` — ``GET /health`` (unversioned)
 * ``api_v1`` — prefix ``/api/v1``:
   - Knowledge — ``POST /knowledge/ingest``
-  - Debug — ``GET /debug/sql-auth``
+  - Debug — ``GET /debug/sql-auth``, ``GET /debug/guide``
   - RCA — ``POST /rca/analyze``, recommendation list/get/patch
   - Cluster tuning — ``POST /cluster_tuning/recommend``, recommendation list/get/patch
   - HITL — ``POST /sessions``, ``GET /sessions/{id}``, ``POST /sessions/{id}/resume``
@@ -54,6 +54,7 @@ from edim_dde_domain.sources import (
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from edim_dde_api import __version__
+from edim_dde_api.guide import guide_diagnostics
 from edim_dde_api.request_context import (
     get_request_id,
     reset_request_id,
@@ -444,6 +445,20 @@ def debug_sql_auth(request: Request) -> dict[str, Any]:
             "the app, and call via the App URL while signed into the workspace."
         ),
     }
+
+
+@api_v1.get("/debug/guide")
+def debug_guide() -> dict[str, Any]:
+    """Non-secret MkDocs ``/guide`` mount diagnostics (Apps bring-up).
+
+    HTTP:
+        ``GET /api/v1/debug/guide`` → whether ``/guide/`` should be mounted and
+        which candidate paths were checked on disk.
+
+    Returns:
+        Diagnostic dict (no secrets).
+    """
+    return guide_diagnostics()
 
 
 @api_v1.post("/rca/analyze", response_model=RcaResponse)

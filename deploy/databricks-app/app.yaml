@@ -67,3 +67,8 @@ env:
   # --- CORS (only if a browser UI calls this App) ---
   # - name: EDIM_CORS_ORIGINS
   #   value: "https://your-ui.example.com"
+
+  - name: EDIM_MOUNT_GUIDE
+    value: "1"
+  - name: EDIM_GUIDE_SITE_DIR
+    value: "guide-site"
