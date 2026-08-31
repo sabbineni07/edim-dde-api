@@ -11,7 +11,7 @@ Public API / endpoint groups
 ----------------------------
 * ``app`` — ASGI application (uvicorn target ``edim_dde_api.main:app``)
 * ``lifespan`` — startup/shutdown context for plane configuration + bootstrap
-* Exception handlers — ``FoundryLLMNotConfiguredError`` / ``ChainInvokerError`` → 503
+* Exception handlers — framework/configuration errors → stable HTTP responses
 * ``main`` — local uvicorn launcher (host ``0.0.0.0:8080``, reload)
 * Mounted routes — ``/health``, ``/api/v1/*`` (see ``routes``), ``/guide/``
 """
@@ -29,7 +29,10 @@ from edim_dde_ai import (
     set_llm_provider,
     sync_registered_agents_to_store,
 )
-from edim_dde_ai.errors import ChainInvokerError
+from edim_dde_ai.errors import (
+    ChainInvokerError,
+    ConversationMemoryDisabledError,
+)
 from edim_dde_domain import (
     FoundryLLMNotConfiguredError,
     bootstrap_agents,
@@ -119,6 +122,20 @@ async def lifespan(_app: FastAPI):
         log_exception_once(
             log,
             "State store configure failed; continuing with memory",
+            exc,
+            level=logging.WARNING,
+        )
+
+    # Conversation memory: EDIM_CONVERSATION_STORE inherits EDIM_STATE_STORE
+    # when unset, but uses separate tables/keys from control-plane sessions.
+    try:
+        from edim_dde_ai import configure_conversation_store_from_env
+
+        configure_conversation_store_from_env()
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            log,
+            "Conversation store configure failed; continuing with memory",
             exc,
             level=logging.WARNING,
         )
@@ -330,6 +347,28 @@ async def chain_invoker_handler(
         content={
             "detail": "LLM chain failed; see server logs for details",
             "error_code": "LLM_CHAIN_ERROR",
+        },
+    )
+
+
+@app.exception_handler(ConversationMemoryDisabledError)
+async def conversation_memory_disabled_handler(
+    _request: Request, exc: ConversationMemoryDisabledError
+) -> JSONResponse:
+    """Reject conversation context when an agent opted out of memory."""
+    import logging
+
+    log_exception_once(
+        logging.getLogger(__name__),
+        "Conversation memory requested for disabled agent",
+        exc,
+        level=logging.WARNING,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": safe_exc_message(exc),
+            "error_code": "CONVERSATION_MEMORY_DISABLED",
         },
     )
 

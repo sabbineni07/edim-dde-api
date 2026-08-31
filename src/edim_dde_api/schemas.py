@@ -34,6 +34,9 @@ class RcaRequest(BaseModel):
             (must belong to process ``EDIM_ENV``; never cross-env).
         error_text: Optional failure text for classification with evidence.
         evidence_pack: Optional pre-built evidence; otherwise agent gathers via SQL.
+        conversation_id: Optional conversation key for follow-up questions when
+            memory is enabled.
+        message: Optional engineer question; standalone when memory is disabled.
     """
 
     job_run_id: str = Field(..., examples=["jr-1001"])
@@ -47,6 +50,16 @@ class RcaRequest(BaseModel):
         examples=["Executor OutOfMemoryError: Java heap space"],
     )
     evidence_pack: Optional[dict[str, Any]] = None
+    conversation_id: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Conversation key returned by a prior RCA response when memory is enabled",
+    )
+    message: Optional[str] = Field(
+        None,
+        max_length=8000,
+        description="Optional engineer question; standalone when memory is disabled",
+    )
 
 
 class RootCause(BaseModel):
@@ -131,6 +144,7 @@ class RcaResponse(BaseModel):
     web_search_context: Optional[str] = None
     web_search_hits: list[dict[str, Any]] = Field(default_factory=list)
     quality: dict[str, Any] = Field(default_factory=dict)
+    conversation_id: Optional[str] = None
     recommendation_id: Optional[str] = Field(
         None, description="Persisted RCA lifecycle record id when enabled"
     )
@@ -198,6 +212,9 @@ class TuningRequest(BaseModel):
             (must belong to process ``EDIM_ENV``; see workspace resolver).
         include_explanation: When true, agent may populate ``explanation``.
         metrics: Optional metrics override; otherwise domain SQL reads Databricks.
+        conversation_id: Optional conversation key returned by a prior response
+            when memory is enabled.
+        message: Optional engineer question; standalone when memory is disabled.
     """
 
     job_id: str = Field(..., examples=["job-42"])
@@ -233,6 +250,16 @@ class TuningRequest(BaseModel):
             }
         ],
     )
+    conversation_id: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Conversation key returned by a prior tuning response when memory is enabled",
+    )
+    message: Optional[str] = Field(
+        None,
+        max_length=8000,
+        description="Optional engineer question; standalone when memory is disabled",
+    )
 
 
 class TuningResponse(BaseModel):
@@ -257,6 +284,7 @@ class TuningResponse(BaseModel):
             RecommendationStore persist succeeds.
         quality: Deterministic ``cluster_tuning.quality`` rubric snapshot
             (score / confidence / dimensions) when evaluation succeeds.
+        conversation_id: Conversation key for follow-up questions.
     """
 
     request_id: Optional[str] = None
@@ -287,6 +315,7 @@ class TuningResponse(BaseModel):
         default_factory=dict,
         description="cluster_tuning.quality rubric snapshot when evaluated",
     )
+    conversation_id: Optional[str] = None
 
 
 class RecommendationStatusUpdate(BaseModel):

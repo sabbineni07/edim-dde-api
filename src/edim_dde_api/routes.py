@@ -27,8 +27,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from edim_dde_ai import create_agent, list_agents
-from edim_dde_ai.errors import HitlError
+from edim_dde_ai import create_agent, get_conversation_store, list_agents
+from edim_dde_ai.errors import ConversationMemoryDisabledError, HitlError
 from edim_dde_ai.hitl import STATUS_WAITING, resume_hitl_session
 from edim_dde_ai.observability import build_run_config, get_observability_provider
 from edim_dde_ai.recommendations import (
@@ -109,6 +109,29 @@ def _request_id(
     ).strip() or str(uuid.uuid4())
 
 
+def _conversation_payload(
+    body: Any, *, request_id: str, memory_enabled: bool
+) -> tuple[dict[str, Any], str | None]:
+    """Normalize conversation input according to the agent memory policy."""
+    payload = body.model_dump()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    message = payload.pop("message", None)
+    payload["request_id"] = request_id
+    if message:
+        payload["user_message"] = message
+    if not memory_enabled:
+        if conversation_id:
+            raise ConversationMemoryDisabledError(
+                "Conversational memory is disabled for this agent; "
+                "configure memory.strategy or remove conversation_id"
+            )
+        payload.pop("conversation_id", None)
+        return payload, None
+    conversation_id = conversation_id or str(uuid.uuid4())
+    payload["conversation_id"] = conversation_id
+    return payload, conversation_id
+
+
 def _http_from_exc(
     *,
     status_code: int,
@@ -184,10 +207,11 @@ def health() -> dict[str, Any]:
     HTTP:
         ``GET /health`` → ``200`` JSON with ``status=ok``, registered agent ids,
         package version, and active backend names for observability, state store,
-        recommendation store, retrieval, and web search.
+        conversation memory, recommendation store, retrieval, and web search.
     """
     obs = get_observability_provider()
     store = get_state_store()
+    conversation_store = get_conversation_store()
     retrieval = get_retrieval_provider()
     web_search = get_web_search_provider()
     rec_store = get_recommendation_store()
@@ -197,6 +221,7 @@ def health() -> dict[str, Any]:
         "version": __version__,
         "observability": getattr(obs, "name", "unknown"),
         "state_store": getattr(store, "name", "unknown"),
+        "conversation_store": getattr(conversation_store, "name", "unknown"),
         "recommendation_store": getattr(rec_store, "name", "unknown"),
         "retrieval": getattr(retrieval, "name", "unknown"),
         "web_search": getattr(web_search, "name", "unknown"),
@@ -489,14 +514,19 @@ async def analyze_rca(
     try:
         agent = create_agent("spark_rca")
         config = build_run_config(agent_id="spark_rca", request_id=rid)
-        payload = body.model_dump()
-        payload["request_id"] = rid
+        payload, conversation_id = _conversation_payload(
+            body,
+            request_id=rid,
+            memory_enabled=agent.memory.policy.enabled,
+        )
         final = await _invoke_agent_in_thread(
             request,
             lambda: agent.invoke(payload, config=config),
             request_id=rid,
         )
-        response = rca_response_from_agent_state(final)
+        response = rca_response_from_agent_state(final).model_copy(
+            update={"conversation_id": conversation_id}
+        )
         return _persist_rca_recommendation(body, response, request_id=rid)
     except ValueError as exc:
         raise _http_from_exc(
@@ -551,14 +581,19 @@ async def recommend_cluster(
     try:
         agent = create_agent("cluster_tuning")
         config = build_run_config(agent_id="cluster_tuning", request_id=rid)
-        payload = body.model_dump()
-        payload["request_id"] = rid
+        payload, conversation_id = _conversation_payload(
+            body,
+            request_id=rid,
+            memory_enabled=agent.memory.policy.enabled,
+        )
         final = await _invoke_agent_in_thread(
             request,
             lambda: agent.invoke(payload, config=config),
             request_id=rid,
         )
-        response = tuning_response_from_agent_state(final, request_id=rid)
+        response = tuning_response_from_agent_state(final, request_id=rid).model_copy(
+            update={"conversation_id": conversation_id}
+        )
         response = _attach_tuning_quality(final, response)
         response = _persist_tuning_recommendation(body, response, request_id=rid)
         return response
@@ -617,6 +652,7 @@ def _bounded_rca_store_response(response: RcaResponse) -> dict[str, Any]:
             "web_search_hits",
             "recommendation_id",
             "recommendation_status",
+            "conversation_id",
         }
     )
     pack = response.evidence_pack if isinstance(response.evidence_pack, dict) else {}
@@ -680,7 +716,9 @@ def _persist_rca_recommendation(
             job_run_id=response.job_run_id or body.job_run_id,
             request_id=request_id,
             env=os.environ.get("EDIM_ENV"),
-            request=body.model_dump(exclude={"evidence_pack"}),
+            request=body.model_dump(
+                exclude={"evidence_pack", "conversation_id", "message"}
+            ),
             response=_bounded_rca_store_response(response),
         )
         store.save(record)
@@ -774,8 +812,10 @@ def _persist_tuning_recommendation(
             job_run_id=response.job_run_id or body.job_run_id,
             request_id=request_id,
             env=os.environ.get("EDIM_ENV"),
-            request=body.model_dump(exclude={"metrics"}),
-            response=response.model_dump(),
+            request=body.model_dump(
+                exclude={"metrics", "conversation_id", "message"}
+            ),
+            response=response.model_dump(exclude={"conversation_id"}),
         )
         store.save(record)
         return response.model_copy(
