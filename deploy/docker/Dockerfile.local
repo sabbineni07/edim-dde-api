@@ -1,0 +1,38 @@
+# Local reproducibility image for the ACA Native host.
+#
+# This intentionally uses a public Python base image and does not require the
+# enterprise Artifactory certificate or base image. The production Dockerfile
+# remains deploy/docker/Dockerfile.
+
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+COPY deploy/docker/requirements.txt /tmp/requirements.txt
+COPY deploy/databricks-app/vendor /app/vendor
+COPY deploy/docker/guide-site /app/guide-site
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+ && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
+ && python -m pip install --no-cache-dir /app/vendor/*.whl \
+ && python -m pip install --no-cache-dir \
+      "databricks-sql-connector>=3.0" \
+      "azure-identity>=1.15" \
+      "azure-keyvault-secrets>=4.8" \
+      "openai>=1.40" \
+      "psycopg[binary]>=3.1" \
+ && useradd --create-home --shell /bin/bash edim \
+ && chown -R edim:edim /app
+
+ENV EDIM_GUIDE_SITE_DIR=/app/guide-site
+
+USER edim
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "uvicorn edim_dde_api.main:app --host 0.0.0.0 --port ${PORT}"]

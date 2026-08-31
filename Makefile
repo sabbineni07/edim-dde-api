@@ -5,7 +5,7 @@
 # Smoke: ../edim-dde-domain/docs/contribute/live-smoke-test.md
 
 .PHONY: help vendor-wheels vendor-wheels-win guide-site guide-site-win copy-guide-site bundle-guide-site-win apps-create apps-sync apps-sync-win apps-deploy apps-deploy-win apps-get apps-list \
-	docker-build docker-run compose-up compose-down compose-ps compose-logs \
+	docker-build docker-build-local docker-run docker-run-local compose-up compose-down compose-ps compose-logs \
 	pg-up pg-down pg-ps pg-wait host-run host-up \
 	e2e-health e2e-dry e2e-local clean-vendor
 
@@ -129,8 +129,20 @@ docker-build: ## Build API image only (runs vendor-wheels first)
 	$(MAKE) vendor-wheels
 	docker build -f deploy/docker/Dockerfile -t "$(DOCKER_IMAGE)" .
 
+docker-build-local: ## Build ACA Native image with public Python base (local only)
+	$(MAKE) vendor-wheels
+	docker build -f deploy/docker/Dockerfile.local -t "$(DOCKER_IMAGE)" .
+
 docker-run: ## Run API image alone (no Postgres — prefer compose-up for E2E)
 	docker run --rm -p 8080:8080 --env-file ../edim-dde-domain/.env "$(DOCKER_IMAGE)"
+
+docker-run-local: ## Run local ACA Native image with Compose Postgres
+	docker run --rm -p 8080:8080 \
+		--env-file ../edim-dde-domain/.env \
+		-e EDIM_STATE_STORE=postgres \
+		-e EDIM_RECOMMENDATION_STORE=postgres \
+		-e EDIM_DATABASE_URL=postgresql://edim:edim@host.docker.internal:5432/edim \
+		"$(DOCKER_IMAGE)"
 
 compose-up: ## Build & start API + Postgres StateStore
 	$(MAKE) vendor-wheels

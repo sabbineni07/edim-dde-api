@@ -1,0 +1,35 @@
+using './main.bicep'
+
+param location = 'eastus2'
+param edimEnvironment = 'dev'
+
+// Replace with globally unique names approved for the subscription.
+param acrName = 'REPLACE_ACR_NAME'
+param containerAppsEnvironmentName = 'edim-dde-dev-aca'
+param containerAppName = 'edim-dde-api-dev'
+param runtimeIdentityName = 'edim-dde-api-dev-mi'
+param keyVaultName = 'REPLACE_KEY_VAULT_NAME'
+
+// Use an immutable ACR digest after the image is built and approved.
+param image = 'REPLACE_ACR_NAME.azurecr.io/edim-dde-api@sha256:REPLACE_DIGEST'
+
+// The template references these existing Key Vault secret names.
+param databaseSecretName = 'edim-database-url'
+param foundryTenantSecretName = 'edim-foundry-tenant-id'
+param foundryClientIdSecretName = 'edim-foundry-client-id'
+param foundryClientSecretName = 'edim-foundry-client-secret'
+
+// Set this only after private networking and an approved Log Analytics plan
+// are confirmed. An empty value creates a workspace for DEV review.
+param existingLogAnalyticsWorkspaceId = ''
+param infrastructureSubnetId = ''
+param internalIngress = true
+
+param minReplicas = 1
+param maxReplicas = 3
+param containerCpu = '0.5'
+param containerMemory = '1Gi'
+
+// Keep false for the first foundation what-if/apply.
+param deployContainerApp = false
+param createLogAnalyticsWorkspace = true
