@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from edim_dde_ai import create_agent, set_llm_provider
+from edim_dde_ai import create_agent, get_conversation_store, set_llm_provider
 from edim_dde_ai.content.registry import clear_llm_provider
+from edim_dde_ai.errors import ConversationMemoryDisabledError
 from edim_dde_domain import bootstrap_agents, reset_bootstrap
 from edim_dde_domain.sources import clear_sources
 from edim_dde_domain.testing import DomainStubLLM
+from edim_dde_api.routes import _conversation_payload
+from edim_dde_api.schemas import TuningRequest
 from fastapi.testclient import TestClient
 
 
@@ -93,6 +96,55 @@ def test_health_http(client: TestClient):
     assert body["web_search"] in {"none", "memory", "http_json"}
 
 
+def test_disabled_memory_rejects_conversation_id():
+    body = TuningRequest(
+        job_id="j-disabled",
+        cluster_id="c-1",
+        conversation_id="existing-conversation",
+        message="Can we reduce the worker count further?",
+    )
+
+    with pytest.raises(ConversationMemoryDisabledError) as exc_info:
+        _conversation_payload(
+            body,
+            request_id="r-disabled",
+            memory_enabled=False,
+        )
+
+    assert "memory is disabled" in str(exc_info.value)
+
+
+def test_disabled_memory_http_rejects_conversation_id(client: TestClient):
+    res = client.post(
+        "/api/v1/sessions",
+        json={
+            "agent_id": "hitl_demo",
+            "state": {"conversation_id": "existing-conversation", "name": "alpha"},
+        },
+    )
+
+    assert res.status_code == 422
+    assert res.json()["error_code"] == "CONVERSATION_MEMORY_DISABLED"
+
+
+def test_disabled_memory_treats_message_as_standalone():
+    body = TuningRequest(
+        job_id="j-standalone",
+        cluster_id="c-1",
+        message="Explain this recommendation.",
+    )
+
+    payload, conversation_id = _conversation_payload(
+        body,
+        request_id="r-standalone",
+        memory_enabled=False,
+    )
+
+    assert conversation_id is None
+    assert "conversation_id" not in payload
+    assert payload["user_message"] == "Explain this recommendation."
+
+
 def test_cluster_tuning_recommend_v1_http(client: TestClient):
     res = client.post(
         "/api/v1/cluster_tuning/recommend",
@@ -122,7 +174,9 @@ def test_cluster_tuning_recommend_v1_http(client: TestClient):
     assert body.get("recommendation_id")
     assert body.get("recommendation_status") == "proposed"
     rid = body["recommendation_id"]
-    listed = client.get("/api/v1/cluster_tuning/recommendations", params={"job_id": "j-1"})
+    listed = client.get(
+        "/api/v1/cluster_tuning/recommendations", params={"job_id": "j-1"}
+    )
     assert listed.status_code == 200
     assert any(row["recommendation_id"] == rid for row in listed.json())
     got = client.get(f"/api/v1/cluster_tuning/recommendations/{rid}")
@@ -135,7 +189,64 @@ def test_cluster_tuning_recommend_v1_http(client: TestClient):
     assert patched.status_code == 200
     assert patched.json()["status"] == "accepted"
     # Unversioned path removed
-    assert client.post("/api/v1/recommendations", json={"job_id": "j", "cluster_id": "c"}).status_code == 404
+    assert client.post(
+        "/api/v1/recommendations", json={"job_id": "j", "cluster_id": "c"}
+    ).status_code == 404
+
+
+def test_cluster_tuning_conversation_follow_up(client: TestClient):
+    first = client.post(
+        "/api/v1/cluster_tuning/recommend",
+        json={
+            "job_id": "j-conversation",
+            "cluster_id": "c-1",
+            "message": "Explain the recommendation for the engineer review.",
+            "metrics": {
+                "azure_worker_vm_size": "Standard_E8s_v3",
+                "max_worker_nodes_provisioned": 16,
+                "avg_worker_nodes_consumed": 4.0,
+                "p99_worker_nodes_consumed": 5.0,
+                "peak_worker_cpu_utilization_pct": 20,
+                "peak_worker_memory_utilization_pct": 25,
+                "avg_worker_cpu_utilization_pct": 15,
+                "avg_worker_memory_utilization_pct": 18,
+                "driver_node_count": 1,
+            },
+        },
+    )
+    assert first.status_code == 200
+    conversation_id = first.json()["conversation_id"]
+    follow_up = client.post(
+        "/api/v1/cluster_tuning/recommend",
+        json={
+            "job_id": "j-conversation",
+            "cluster_id": "c-1",
+            "conversation_id": conversation_id,
+            "message": "Can we reduce the worker count further?",
+            "metrics": {
+                "azure_worker_vm_size": "Standard_E8s_v3",
+                "max_worker_nodes_provisioned": 16,
+                "avg_worker_nodes_consumed": 4.0,
+                "p99_worker_nodes_consumed": 5.0,
+                "peak_worker_cpu_utilization_pct": 20,
+                "peak_worker_memory_utilization_pct": 25,
+                "avg_worker_cpu_utilization_pct": 15,
+                "avg_worker_memory_utilization_pct": 18,
+                "driver_node_count": 1,
+            },
+        },
+    )
+    assert follow_up.status_code == 200
+    assert follow_up.json()["conversation_id"] == conversation_id
+    messages = get_conversation_store().list_messages(
+        conversation_id, agent_id="cluster_tuning"
+    )
+    assert [message.role for message in messages][-4:] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
 
 
 def test_health_includes_recommendation_store(client: TestClient):
