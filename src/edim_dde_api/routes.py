@@ -27,8 +27,9 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from edim_dde_ai import create_agent, get_conversation_store, list_agents
+from edim_dde_ai import create_agent, get_agent_definition, list_agents
 from edim_dde_ai.errors import ConversationMemoryDisabledError, HitlError
+from edim_dde_ai.session import get_memory_policy, resolve_checkpointer_name
 from edim_dde_ai.hitl import STATUS_WAITING, resume_hitl_session
 from edim_dde_ai.observability import build_run_config, get_observability_provider
 from edim_dde_ai.recommendations import (
@@ -129,7 +130,26 @@ def _conversation_payload(
         return payload, None
     conversation_id = conversation_id or str(uuid.uuid4())
     payload["conversation_id"] = conversation_id
+    payload["thread_id"] = conversation_id
     return payload, conversation_id
+
+
+def _memory_enabled(agent_id: str) -> bool:
+    """Return whether the agent accepts conversational follow-ups."""
+    return get_memory_policy(get_agent_definition(agent_id)).enabled
+
+
+def _config_with_thread(
+    config: dict[str, Any] | None, conversation_id: str | None
+) -> dict[str, Any]:
+    """Attach LangGraph ``thread_id`` when a conversation key is present."""
+    if not conversation_id:
+        return dict(config or {})
+    merged = dict(config or {})
+    configurable = dict(merged.get("configurable") or {})
+    configurable.setdefault("thread_id", conversation_id)
+    merged["configurable"] = configurable
+    return merged
 
 
 def _http_from_exc(
@@ -211,7 +231,6 @@ def health() -> dict[str, Any]:
     """
     obs = get_observability_provider()
     store = get_state_store()
-    conversation_store = get_conversation_store()
     retrieval = get_retrieval_provider()
     web_search = get_web_search_provider()
     rec_store = get_recommendation_store()
@@ -221,7 +240,7 @@ def health() -> dict[str, Any]:
         "version": __version__,
         "observability": getattr(obs, "name", "unknown"),
         "state_store": getattr(store, "name", "unknown"),
-        "conversation_store": getattr(conversation_store, "name", "unknown"),
+        "checkpointer": resolve_checkpointer_name(),
         "recommendation_store": getattr(rec_store, "name", "unknown"),
         "retrieval": getattr(retrieval, "name", "unknown"),
         "web_search": getattr(web_search, "name", "unknown"),
@@ -513,11 +532,14 @@ async def analyze_rca(
     request.state.request_id = rid
     try:
         agent = create_agent("spark_rca")
-        config = build_run_config(agent_id="spark_rca", request_id=rid)
         payload, conversation_id = _conversation_payload(
             body,
             request_id=rid,
-            memory_enabled=agent.memory.policy.enabled,
+            memory_enabled=_memory_enabled("spark_rca"),
+        )
+        config = _config_with_thread(
+            build_run_config(agent_id="spark_rca", request_id=rid),
+            conversation_id,
         )
         final = await _invoke_agent_in_thread(
             request,
@@ -580,11 +602,14 @@ async def recommend_cluster(
     request.state.request_id = rid
     try:
         agent = create_agent("cluster_tuning")
-        config = build_run_config(agent_id="cluster_tuning", request_id=rid)
         payload, conversation_id = _conversation_payload(
             body,
             request_id=rid,
-            memory_enabled=agent.memory.policy.enabled,
+            memory_enabled=_memory_enabled("cluster_tuning"),
+        )
+        config = _config_with_thread(
+            build_run_config(agent_id="cluster_tuning", request_id=rid),
+            conversation_id,
         )
         final = await _invoke_agent_in_thread(
             request,

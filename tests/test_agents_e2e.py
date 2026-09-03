@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from edim_dde_ai import create_agent, get_conversation_store, set_llm_provider
+from edim_dde_ai import create_agent, set_llm_provider
+from edim_dde_ai.registry.agents import clear_agent_cache
+from edim_dde_ai.session import clear_checkpointer, configure_checkpointer_from_env
 from edim_dde_ai.content.registry import clear_llm_provider
 from edim_dde_ai.errors import ConversationMemoryDisabledError
 from edim_dde_domain import bootstrap_agents, reset_bootstrap
@@ -195,6 +197,9 @@ def test_cluster_tuning_recommend_v1_http(client: TestClient):
 
 
 def test_cluster_tuning_conversation_follow_up(client: TestClient):
+    clear_agent_cache()
+    clear_checkpointer()
+    configure_checkpointer_from_env()
     first = client.post(
         "/api/v1/cluster_tuning/recommend",
         json={
@@ -238,15 +243,6 @@ def test_cluster_tuning_conversation_follow_up(client: TestClient):
     )
     assert follow_up.status_code == 200
     assert follow_up.json()["conversation_id"] == conversation_id
-    messages = get_conversation_store().list_messages(
-        conversation_id, agent_id="cluster_tuning"
-    )
-    assert [message.role for message in messages][-4:] == [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-    ]
 
 
 def test_health_includes_recommendation_store(client: TestClient):
