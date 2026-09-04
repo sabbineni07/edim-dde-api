@@ -113,6 +113,8 @@ class RcaResponse(BaseModel):
         quality: Rubric / QA scores from the agent.
         recommendation_id / recommendation_status: Lifecycle fields when
             RecommendationStore persist succeeds.
+        explanation: Optional narrative from session converse follow-ups.
+        conversation_id: Session key for multi-turn follow-ups.
     """
 
     request_id: Optional[str] = None
@@ -144,6 +146,10 @@ class RcaResponse(BaseModel):
     web_search_context: Optional[str] = None
     web_search_hits: list[dict[str, Any]] = Field(default_factory=list)
     quality: dict[str, Any] = Field(default_factory=dict)
+    explanation: str = Field(
+        "",
+        description="Optional narrative from session converse follow-ups",
+    )
     conversation_id: Optional[str] = None
     recommendation_id: Optional[str] = Field(
         None, description="Persisted RCA lifecycle record id when enabled"
@@ -389,7 +395,8 @@ def rca_response_from_agent_state(final: dict[str, Any]) -> RcaResponse:
         final: Final ``spark_rca`` agent state after ``invoke``.
 
     Returns:
-        Validated ``RcaResponse`` from ``final["result"]``.
+        Validated ``RcaResponse`` from ``final["result"]``, plus optional
+        session ``explanation`` / ``conversation_id`` from the outer state.
 
     Raises:
         ValueError: When ``result`` is missing or not a dict.
@@ -397,7 +404,14 @@ def rca_response_from_agent_state(final: dict[str, Any]) -> RcaResponse:
     result = final.get("result")
     if not isinstance(result, dict):
         raise ValueError("spark_rca agent state missing result object")
-    return RcaResponse.model_validate(result)
+    payload = dict(result)
+    explanation = str(final.get("explanation") or payload.get("explanation") or "")
+    if explanation:
+        payload["explanation"] = explanation
+    conversation_id = final.get("conversation_id") or final.get("thread_id")
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
+    return RcaResponse.model_validate(payload)
 
 
 def tuning_response_from_agent_state(
