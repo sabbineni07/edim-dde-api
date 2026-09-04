@@ -20,12 +20,6 @@ COPY deploy/docker/guide-site /app/guide-site
 RUN python -m pip install --no-cache-dir --upgrade pip \
  && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
  && python -m pip install --no-cache-dir /app/vendor/*.whl \
- && python -m pip install --no-cache-dir \
-      "databricks-sql-connector>=3.0" \
-      "azure-identity>=1.15" \
-      "azure-keyvault-secrets>=4.8" \
-      "openai>=1.40" \
-      "psycopg[binary]>=3.1" \
  && useradd --create-home --shell /bin/bash edim \
  && chown -R edim:edim /app
 

@@ -7,7 +7,7 @@
 .PHONY: help vendor-wheels vendor-wheels-win guide-site guide-site-win copy-guide-site bundle-guide-site-win apps-create apps-sync apps-sync-win apps-deploy apps-deploy-win apps-get apps-list \
 	docker-build docker-build-local docker-run docker-run-local compose-up compose-down compose-ps compose-logs \
 	pg-up pg-down pg-ps pg-wait host-run host-up \
-	e2e-health e2e-dry e2e-local clean-vendor
+	e2e-health e2e-dry e2e-durable e2e-local clean-vendor
 
 PYTHON ?= python3
 APP_NAME ?= edim-dde-api-dev
@@ -20,6 +20,7 @@ GIT_BASH ?= C:/Program Files/Git/bin/bash.exe
 DOCKER_IMAGE ?= edim-dde-api:local
 BASE ?= http://127.0.0.1:8080
 EXPECT_STATE_STORE ?= postgres
+EXPECT_CHECKPOINTER ?= postgres
 # Host uvicorn (API on laptop + Postgres in Docker) — preferred when az login must run on the host
 PORT ?= 8080
 RELOAD ?= 1
@@ -141,6 +142,7 @@ docker-run-local: ## Run local ACA Native image with Compose Postgres
 		--env-file ../edim-dde-domain/.env \
 		-e EDIM_STATE_STORE=postgres \
 		-e EDIM_RECOMMENDATION_STORE=postgres \
+		-e EDIM_CHECKPOINTER=postgres \
 		-e EDIM_DATABASE_URL=postgresql://edim:edim@host.docker.internal:5432/edim \
 		"$(DOCKER_IMAGE)"
 
@@ -199,6 +201,7 @@ host-run: pg-up ## Postgres in Docker + uvicorn on laptop (uses host az login)
 	export EDIM_STATE_STORE=postgres; \
 	export EDIM_DATABASE_URL="$(HOST_DATABASE_URL)"; \
 	if [ -z "$${EDIM_RECOMMENDATION_STORE:-}" ]; then export EDIM_RECOMMENDATION_STORE=postgres; fi; \
+	if [ -z "$${EDIM_CHECKPOINTER:-}" ]; then export EDIM_CHECKPOINTER=postgres; fi; \
 	reload_flag=""; \
 	if [ "$(RELOAD)" = "1" ]; then reload_flag="--reload"; fi; \
 	exec $(PYTHON) -m uvicorn edim_dde_api.main:app --host 127.0.0.1 --port "$(PORT)" $$reload_flag'
@@ -216,12 +219,20 @@ e2e-health: ## Wait for /health (BASE); assert state_store=postgres by default
 	$(PYTHON) -c "import json; h=json.load(open(\"/tmp/edim-e2e-health.json\")); print(h); assert h.get(\"status\")==\"ok\"; assert h.get(\"state_store\")==\"$(EXPECT_STATE_STORE)\", h"'
 
 e2e-dry: ## Full dry E2E vs Compose/API (health + tuning + RCA; needs Foundry)
-	BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" PYTHON="$(PYTHON)" \
+	BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" \
+	EXPECT_CHECKPOINTER="$(EXPECT_CHECKPOINTER)" PYTHON="$(PYTHON)" \
+	./deploy/scripts/e2e_smoke.sh
+
+e2e-durable: ## Dry E2E + restart API between init and follow-ups (postgres checkpointer)
+	BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" \
+	EXPECT_CHECKPOINTER="$(EXPECT_CHECKPOINTER)" DURABLE_SESSION_SMOKE=1 \
+	COMPOSE_DIR="$(CURDIR)" PYTHON="$(PYTHON)" \
 	./deploy/scripts/e2e_smoke.sh
 
 e2e-local: ## compose-up + e2e-dry (one-shot local container E2E)
 	$(MAKE) compose-up
-	$(MAKE) e2e-dry BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)"
+	$(MAKE) e2e-dry BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" \
+		EXPECT_CHECKPOINTER="$(EXPECT_CHECKPOINTER)"
 
 clean-vendor: ## Remove vendored wheels
 	rm -rf deploy/databricks-app/vendor

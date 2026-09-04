@@ -1,4 +1,22 @@
-# Extra pins for Docker builds (wheels installed separately in Dockerfile).
+# Docker image runtime pins (ACA / Compose). Vendor wheels install separately.
+# Keep in sync with deploy/databricks-app/requirements.txt host extras where shared.
+#
+# Install order in Dockerfile:
+#   1) -r this file
+#   2) /app/vendor/*.whl  (edim-dde-ai / domain / api)
+
+# API host
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.0
+
+# Domain runtime (SQL + Foundry + Key Vault)
+databricks-sql-connector>=3.0
+azure-identity>=1.15
+azure-keyvault-secrets>=4.8
+openai>=1.40
+
+# Postgres StateStore / RecommendationStore / LangGraph checkpointer
+psycopg[binary]>=3.1
+psycopg-pool>=3.2
+langgraph-checkpoint-postgres>=2.0

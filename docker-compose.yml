@@ -64,7 +64,8 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_TRACING: ${LANGCHAIN_TRACING:-false}
       EDIM_RETRIEVAL: ${EDIM_RETRIEVAL:-none}
-      EDIM_CHECKPOINTER: ${EDIM_CHECKPOINTER:-memory}
+      # Durable multi-turn sessions across API restarts (same Postgres as StateStore)
+      EDIM_CHECKPOINTER: ${EDIM_CHECKPOINTER:-postgres}
     depends_on:
       postgres:
         condition: service_healthy
