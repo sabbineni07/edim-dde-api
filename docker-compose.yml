@@ -59,8 +59,13 @@ services:
       EDIM_STATE_STORE: postgres
       EDIM_DATABASE_URL: postgresql://edim:edim@postgres:5432/edim
       EDIM_STRICT_STARTUP: ${EDIM_STRICT_STARTUP:-0}
+      # Default local Compose: no external tracing (overrides LANGCHAIN_* from .env).
       EDIM_OBSERVABILITY: ${EDIM_OBSERVABILITY:-none}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_TRACING: ${LANGCHAIN_TRACING:-false}
       EDIM_RETRIEVAL: ${EDIM_RETRIEVAL:-none}
+      # Durable multi-turn sessions across API restarts (same Postgres as StateStore)
+      EDIM_CHECKPOINTER: ${EDIM_CHECKPOINTER:-postgres}
     depends_on:
       postgres:
         condition: service_healthy

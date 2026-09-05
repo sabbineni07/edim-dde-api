@@ -126,16 +126,15 @@ async def lifespan(_app: FastAPI):
             level=logging.WARNING,
         )
 
-    # Conversation memory: EDIM_CONVERSATION_STORE inherits EDIM_STATE_STORE
-    # when unset, but uses separate tables/keys from control-plane sessions.
+    # LangGraph session checkpoints for multi-turn analysis sessions.
     try:
-        from edim_dde_ai import configure_conversation_store_from_env
+        from edim_dde_ai.session import configure_checkpointer_from_env
 
-        configure_conversation_store_from_env()
+        configure_checkpointer_from_env()
     except Exception as exc:  # noqa: BLE001
         log_exception_once(
             log,
-            "Conversation store configure failed; continuing with memory",
+            "Checkpointer configure failed; continuing with in-memory default",
             exc,
             level=logging.WARNING,
         )

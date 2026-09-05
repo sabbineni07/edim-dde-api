@@ -1,7 +1,11 @@
 # Runtime deps (sibling editable checkouts for local development):
--e ../edim-dde-ai[azure-search,cosmos]
+-e ../edim-dde-ai[azure-search,cosmos,postgres]
 -e ../edim-dde-domain[azure,databricks,llm]
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.0
-azure-search-documentation>=11.4
+azure-search-documents>=11.4
+# Explicit pins (also pulled via edim-dde-ai[postgres]) for host-run clarity
+psycopg[binary]>=3.1
+psycopg-pool>=3.2
+langgraph-checkpoint-postgres>=2.0

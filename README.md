@@ -4,14 +4,16 @@ Thin **FastAPI** app. Agents and tools live in
 [`edim-dde-domain`](../edim-dde-domain); graphs run via
 [`edim-dde-ai`](../edim-dde-ai).
 
-**Docs:** [Stack engineer guide](../edim-dde-domain/docs/README.md) · [Endpoints](../edim-dde-domain/docs/api/endpoints.md) · [Configuration](../edim-dde-domain/docs/api/configuration.md) · [**Deploy & hosting**](../edim-dde-domain/docs/api/deploy-and-hosting.md)
+**Docs:** [Stack engineer guide](../edim-dde-domain/docs/README.md) · [Endpoints](../edim-dde-domain/docs/api/endpoints.md) · [Configuration](../edim-dde-domain/docs/api/configuration.md) · [**Deployment targets and release runbook](../edim-dde-domain/docs/api/deployment-targets.md) · [Deploy & hosting compatibility runbook](../edim-dde-domain/docs/api/deploy-and-hosting.md)
 
 ```text
 Client → edim-dde-api (HTTP)
               │  CORS + DatabricksUserTokenMiddleware
-              │  lifespan: bootstrap_agents + Foundry LLM provider
+              │  lifespan: KV + observability + StateStore + checkpointer
+              │            + RecommendationStore + retrieval + bootstrap + Foundry
               ▼
          edim-dde-ai create_agent(...).invoke(...)  (via asyncio.to_thread)
+         # session agents: conversation_id → EDIM_CHECKPOINTER
 ```
 
 ## Layout
@@ -23,12 +25,26 @@ src/edim_dde_api/
   routes.py       # /health, /api/v1/rca/analyze, /api/v1/cluster_tuning/recommend
   schemas.py      # request + response Pydantic models (OpenAPI)
 deploy/
-  databricks-app/ # app.yaml + requirements (default host)
-  docker/         # portable Dockerfile (ACA / AKS / …)
+  databricks-app/ # app.yaml + requirements (compatibility host)
+  docker/         # ACA Native Dockerfiles
   scripts/        # build_vendor_wheels.sh
 ```
 
-## Deploy (Databricks Apps default)
+## Select a deployment target
+
+| Target | Status | Runtime |
+|---|---|---|
+| ACA Native | **Standard** | `uvicorn edim_dde_api.main:app` |
+| Standalone Agent Server on ACA | Optional | LangGraph Agent Server + graph manifest |
+| Full self-hosted LangSmith Deployment on AKS | Optional | LangSmith control plane + Agent Server |
+| Databricks Apps | Compatibility | `uvicorn edim_dde_api.main:app` |
+
+Start with the [Deployment targets and release runbook](../edim-dde-domain/docs/api/deployment-targets.md).
+It explains the shared YAML artifact, identity model, packaging steps, target
+configuration, rollout, validation, and rollback. The Databricks Apps commands
+below remain for existing Apps workloads.
+
+## Deploy (Databricks Apps compatibility path)
 
 ```bash
 cd edim-dde-api
@@ -48,7 +64,7 @@ make guide-site && make compose-up
 # open http://127.0.0.1:8080/guide/
 ```
 
-Full runbook (Apps console / CLI / CI, packaging Options A–D): [Deploy & hosting §5](../edim-dde-domain/docs/api/deploy-and-hosting.md#5-deploy--databricks-apps-default).
+Apps runbook (console / CLI / CI, packaging Options A–D): [Deploy & hosting](../edim-dde-domain/docs/api/deploy-and-hosting.md) §5.
 
 ## Docker — local E2E
 
@@ -72,7 +88,12 @@ make e2e-local           # compose-up + dry health/tuning/RCA
 make compose-up && make e2e-dry && make compose-down
 ```
 
-Postgres = control-plane StateStore only. Guide: [Deploy §6.1](../edim-dde-domain/docs/api/deploy-and-hosting.md#61-docker-compose-api--postgres--recommended-locally) · [Live smoke](../edim-dde-domain/docs/contribute/live-smoke-test.md).
+Postgres backs **StateStore** (catalog / HITL), **RecommendationStore** (when
+postgres), and **LangGraph checkpointer** (`EDIM_CHECKPOINTER=postgres`) so
+multi-turn `conversation_id` follow-ups survive API restarts. Guide:
+[Deploy §6.1](../edim-dde-domain/docs/api/deploy-and-hosting.md#61-docker-compose-api--postgres--recommended-locally) ·
+[Live smoke](../edim-dde-domain/docs/contribute/live-smoke-test.md) ·
+`make e2e-dry` / `make e2e-durable`.
 ## Setup
 
 ```bash

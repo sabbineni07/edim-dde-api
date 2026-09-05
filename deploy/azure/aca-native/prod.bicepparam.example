@@ -1,0 +1,36 @@
+using './main.bicep'
+
+// These are placeholders only. Replace them with values approved by the
+// enterprise platform and security teams. Do not add secrets here.
+param location = 'REPLACE_APPROVED_REGION'
+param edimEnvironment = 'prod'
+param acrName = 'REPLACE_GLOBAL_UNIQUE_ACR_NAME'
+param containerAppsEnvironmentName = 'REPLACE_PROD_ACA_ENVIRONMENT'
+param containerAppName = 'REPLACE_PROD_CONTAINER_APP'
+param runtimeIdentityName = 'REPLACE_PROD_RUNTIME_IDENTITY'
+param keyVaultName = 'REPLACE_PROD_KEY_VAULT'
+
+// Promote an approved immutable image digest; never use :latest.
+param image = 'REPLACE_GLOBAL_UNIQUE_ACR_NAME.azurecr.io/edim-dde-api@sha256:REPLACE_APPROVED_DIGEST'
+
+// Secret names are references to secrets created separately in Key Vault.
+param databaseSecretName = 'REPLACE_PROD_DATABASE_SECRET_NAME'
+param foundryTenantSecretName = 'REPLACE_PROD_FOUNDRY_TENANT_SECRET_NAME'
+param foundryClientIdSecretName = 'REPLACE_PROD_FOUNDRY_CLIENT_ID_SECRET_NAME'
+param foundryClientSecretName = 'REPLACE_PROD_FOUNDRY_CLIENT_SECRET_NAME'
+
+// PROD should use centrally managed logging and private networking.
+param existingLogAnalyticsWorkspaceId = 'REPLACE_LOG_ANALYTICS_RESOURCE_ID'
+param infrastructureSubnetId = 'REPLACE_DELEGATED_ACA_SUBNET_RESOURCE_ID'
+param internalIngress = true
+
+// Reference values only; final limits require load and quota validation.
+param minReplicas = 2
+param maxReplicas = 10
+param containerCpu = '1'
+param containerMemory = '2Gi'
+
+// Keep false until private networking, secrets, permissions, and what-if
+// output have been reviewed and separately approved.
+param deployContainerApp = false
+param createLogAnalyticsWorkspace = false
