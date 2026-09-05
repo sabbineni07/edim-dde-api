@@ -9,9 +9,11 @@ Thin **FastAPI** app. Agents and tools live in
 ```text
 Client → edim-dde-api (HTTP)
               │  CORS + DatabricksUserTokenMiddleware
-              │  lifespan: bootstrap_agents + Foundry LLM provider
+              │  lifespan: KV + observability + StateStore + checkpointer
+              │            + RecommendationStore + retrieval + bootstrap + Foundry
               ▼
          edim-dde-ai create_agent(...).invoke(...)  (via asyncio.to_thread)
+         # session agents: conversation_id → EDIM_CHECKPOINTER
 ```
 
 ## Layout
@@ -86,7 +88,12 @@ make e2e-local           # compose-up + dry health/tuning/RCA
 make compose-up && make e2e-dry && make compose-down
 ```
 
-Postgres = control-plane StateStore only. Guide: [Deploy §6.1](../edim-dde-domain/docs/api/deploy-and-hosting.md#61-docker-compose-api--postgres--recommended-locally) · [Live smoke](../edim-dde-domain/docs/contribute/live-smoke-test.md).
+Postgres backs **StateStore** (catalog / HITL), **RecommendationStore** (when
+postgres), and **LangGraph checkpointer** (`EDIM_CHECKPOINTER=postgres`) so
+multi-turn `conversation_id` follow-ups survive API restarts. Guide:
+[Deploy §6.1](../edim-dde-domain/docs/api/deploy-and-hosting.md#61-docker-compose-api--postgres--recommended-locally) ·
+[Live smoke](../edim-dde-domain/docs/contribute/live-smoke-test.md) ·
+`make e2e-dry` / `make e2e-durable`.
 ## Setup
 
 ```bash
