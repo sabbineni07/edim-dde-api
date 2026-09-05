@@ -30,7 +30,12 @@ from typing import Any, TypeVar
 from edim_dde_ai import create_agent, get_agent_definition, list_agents
 from edim_dde_ai.errors import ConversationMemoryDisabledError, HitlError
 from edim_dde_ai.session import get_memory_policy, resolve_checkpointer_name
-from edim_dde_ai.hitl import STATUS_WAITING, resume_hitl_session
+from edim_dde_ai.hitl import (
+    STATUS_WAITING,
+    is_hitl_waiting,
+    resume_hitl_session,
+    should_persist_after_hitl,
+)
 from edim_dde_ai.observability import build_run_config, get_observability_provider
 from edim_dde_ai.recommendations import (
     RecommendationRecord,
@@ -392,6 +397,50 @@ async def resume_session(
         )
     except HitlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Best-effort RecStore write after product HITL approval / modify.
+    if should_persist_after_hitl(final):
+        try:
+            if rec.agent_id == "cluster_tuning":
+                tuning = tuning_response_from_agent_state(final, request_id=rid)
+                tuning = _persist_tuning_recommendation(
+                    TuningRequest.model_validate(
+                        {
+                            "job_id": str(final.get("job_id") or "unknown"),
+                            "cluster_id": final.get("cluster_id"),
+                            "job_run_id": final.get("job_run_id"),
+                        }
+                    ),
+                    tuning,
+                    request_id=rid,
+                )
+                final = {
+                    **final,
+                    "recommendation_id": tuning.recommendation_id,
+                    "recommendation_status": tuning.recommendation_status,
+                }
+            elif rec.agent_id == "spark_rca":
+                rca = rca_response_from_agent_state(final)
+                rca = _persist_rca_recommendation(
+                    RcaRequest.model_validate(
+                        {
+                            "job_run_id": str(final.get("job_run_id") or "unknown"),
+                            "job_id": final.get("job_id"),
+                        }
+                    ),
+                    rca,
+                    request_id=rid,
+                )
+                final = {
+                    **final,
+                    "recommendation_id": rca.recommendation_id,
+                    "recommendation_status": rca.recommendation_status,
+                }
+        except Exception:  # noqa: BLE001 — persist is best-effort
+            logger.exception(
+                "HITL resume recommendation persist failed agent=%s", rec.agent_id
+            )
+
     status = str(final.get("hitl_status") or "closed")
     return _session_response(
         agent_id=rec.agent_id,
@@ -549,6 +598,10 @@ async def analyze_rca(
         response = rca_response_from_agent_state(final).model_copy(
             update={"conversation_id": conversation_id}
         )
+        if is_hitl_waiting(final):
+            return response
+        if not should_persist_after_hitl(final):
+            return response
         return _persist_rca_recommendation(body, response, request_id=rid)
     except ValueError as exc:
         raise _http_from_exc(
@@ -620,6 +673,10 @@ async def recommend_cluster(
             update={"conversation_id": conversation_id}
         )
         response = _attach_tuning_quality(final, response)
+        if is_hitl_waiting(final):
+            return response
+        if not should_persist_after_hitl(final):
+            return response
         response = _persist_tuning_recommendation(body, response, request_id=rid)
         return response
     except NoJobMetricsError as exc:

@@ -120,6 +120,7 @@ curl -sfS "$BASE/api/v1/cluster_tuning/recommend" \
     \"job_id\": \"dry-job-1\",
     \"cluster_id\": \"dry-cluster-1\",
     \"include_explanation\": false,
+    \"skip_hitl\": true,
     \"metrics\": $METRICS_JSON
   }" | "$PYTHON" -m json.tool >/tmp/edim-e2e-tuning.json
 "$PYTHON" - <<'PY'
@@ -144,6 +145,7 @@ curl -sfS "$BASE/api/v1/cluster_tuning/recommend" \
     \"conversation_id\": \"$CONV_ID\",
     \"message\": \"Why did you recommend this configuration?\",
     \"include_explanation\": true,
+    \"skip_hitl\": true,
     \"metrics\": $METRICS_JSON
   }" | "$PYTHON" -m json.tool >/tmp/edim-e2e-tuning-converse.json
 "$PYTHON" - <<'PY'
@@ -164,6 +166,7 @@ curl -sfS "$BASE/api/v1/cluster_tuning/recommend" \
     \"conversation_id\": \"$CONV_ID\",
     \"message\": \"Can we try something cheaper with fewer workers?\",
     \"include_explanation\": false,
+    \"skip_hitl\": true,
     \"metrics\": $METRICS_JSON
   }" | "$PYTHON" -m json.tool >/tmp/edim-e2e-tuning-regen.json
 "$PYTHON" - <<'PY'
@@ -182,6 +185,7 @@ curl -sfS "$BASE/api/v1/rca/analyze" \
   -d '{
     "job_run_id": "dry-jr-1",
     "job_id": "dry-job-1",
+    "skip_hitl": true,
     "evidence_pack": {
       "job_run_id": "dry-jr-1",
       "evidence": [
@@ -213,6 +217,7 @@ curl -sfS "$BASE/api/v1/rca/analyze" \
     \"job_id\": \"dry-job-1\",
     \"conversation_id\": \"$RCA_CONV\",
     \"message\": \"Why did you conclude this was a resource failure?\",
+    \"skip_hitl\": true,
     \"evidence_pack\": {
       \"job_run_id\": \"dry-jr-1\",
       \"evidence\": [
@@ -240,6 +245,7 @@ curl -sfS "$BASE/api/v1/rca/analyze" \
     \"job_id\": \"dry-job-1\",
     \"conversation_id\": \"$RCA_CONV\",
     \"message\": \"Please re-analyze with a different root cause emphasis\",
+    \"skip_hitl\": true,
     \"evidence_pack\": {
       \"job_run_id\": \"dry-jr-1\",
       \"evidence\": [

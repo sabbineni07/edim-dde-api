@@ -60,6 +60,10 @@ class RcaRequest(BaseModel):
         max_length=8000,
         description="Optional engineer question; standalone when memory is disabled",
     )
+    skip_hitl: bool = Field(
+        False,
+        description="When true, bypass product HITL gate (offline tests / dry automation)",
+    )
 
 
 class RootCause(BaseModel):
@@ -157,6 +161,12 @@ class RcaResponse(BaseModel):
     recommendation_status: Optional[str] = Field(
         None, description="Lifecycle status when persisted (initially proposed)"
     )
+    session_id: Optional[str] = Field(
+        None, description="HITL StateStore session id when status is waiting_hitl"
+    )
+    hitl_prompt: Optional[str] = None
+    hitl_gate_id: Optional[str] = None
+    hitl_decision: Optional[str] = None
 
 
 class KnowledgeIngestRequest(BaseModel):
@@ -266,6 +276,10 @@ class TuningRequest(BaseModel):
         max_length=8000,
         description="Optional engineer question; standalone when memory is disabled",
     )
+    skip_hitl: bool = Field(
+        False,
+        description="When true, bypass product HITL gate (offline tests / dry automation)",
+    )
 
 
 class TuningResponse(BaseModel):
@@ -297,6 +311,10 @@ class TuningResponse(BaseModel):
     job_id: Optional[str] = None
     cluster_id: Optional[str] = None
     job_run_id: Optional[str] = None
+    status: str = Field(
+        "completed",
+        description="completed | waiting_hitl | rejected (HITL product flow)",
+    )
     recommendation: dict[str, Any] = Field(default_factory=dict)
     current_configuration: dict[str, Any] = Field(default_factory=dict)
     comparison: dict[str, Any] = Field(default_factory=dict)
@@ -322,6 +340,12 @@ class TuningResponse(BaseModel):
         description="cluster_tuning.quality rubric snapshot when evaluated",
     )
     conversation_id: Optional[str] = None
+    session_id: Optional[str] = Field(
+        None, description="HITL StateStore session id when status is waiting_hitl"
+    )
+    hitl_prompt: Optional[str] = None
+    hitl_gate_id: Optional[str] = None
+    hitl_decision: Optional[str] = None
 
 
 class RecommendationStatusUpdate(BaseModel):
@@ -411,6 +435,19 @@ def rca_response_from_agent_state(final: dict[str, Any]) -> RcaResponse:
     conversation_id = final.get("conversation_id") or final.get("thread_id")
     if conversation_id:
         payload["conversation_id"] = conversation_id
+    # HITL pause / outcome fields (product approve-only flow).
+    for key in (
+        "session_id",
+        "hitl_prompt",
+        "hitl_gate_id",
+        "hitl_decision",
+    ):
+        if final.get(key) is not None:
+            payload[key] = final.get(key)
+    if final.get("hitl_status") == "waiting_hitl":
+        payload["status"] = "waiting_hitl"
+    elif final.get("status"):
+        payload["status"] = final.get("status")
     return RcaResponse.model_validate(payload)
 
 
@@ -437,6 +474,11 @@ def tuning_response_from_agent_state(
         job_id=final.get("job_id"),
         cluster_id=final.get("cluster_id"),
         job_run_id=final.get("job_run_id"),
+        status=(
+            "waiting_hitl"
+            if final.get("hitl_status") == "waiting_hitl"
+            else str(final.get("status") or "completed")
+        ),
         recommendation=final.get("recommendation") or {},
         current_configuration=final.get("current_configuration") or {},
         comparison=final.get("comparison") or {},
@@ -452,6 +494,11 @@ def tuning_response_from_agent_state(
         recommendation_id=final.get("recommendation_id"),
         recommendation_status=final.get("recommendation_status"),
         quality=dict(final.get("quality") or {}),
+        conversation_id=final.get("conversation_id") or final.get("thread_id"),
+        session_id=final.get("session_id"),
+        hitl_prompt=final.get("hitl_prompt"),
+        hitl_gate_id=final.get("hitl_gate_id"),
+        hitl_decision=final.get("hitl_decision"),
     )
 
 

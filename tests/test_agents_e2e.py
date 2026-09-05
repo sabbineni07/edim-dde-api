@@ -43,6 +43,7 @@ def test_spark_rca_with_evidence_override():
     agent = create_agent("spark_rca")
     out = agent.invoke(
         {
+            "skip_hitl": True,
             "job_run_id": "jr-1",
             "job_id": "j-1",
             "evidence_pack": {
@@ -66,6 +67,7 @@ def test_cluster_tuning_with_explanation():
     agent = create_agent("cluster_tuning")
     out = agent.invoke(
         {
+            "skip_hitl": True,
             "job_id": "j-1",
             "cluster_id": "c-1",
             "include_explanation": True,
@@ -151,6 +153,7 @@ def test_cluster_tuning_recommend_v1_http(client: TestClient):
     res = client.post(
         "/api/v1/cluster_tuning/recommend",
         json={
+            "skip_hitl": True,
             "job_id": "j-1",
             "cluster_id": "c-1",
             "include_explanation": False,
@@ -203,6 +206,7 @@ def test_cluster_tuning_conversation_follow_up(client: TestClient):
     first = client.post(
         "/api/v1/cluster_tuning/recommend",
         json={
+            "skip_hitl": True,
             "job_id": "j-conversation",
             "cluster_id": "c-1",
             "message": "Explain the recommendation for the engineer review.",
@@ -224,6 +228,7 @@ def test_cluster_tuning_conversation_follow_up(client: TestClient):
     follow_up = client.post(
         "/api/v1/cluster_tuning/recommend",
         json={
+            "skip_hitl": True,
             "job_id": "j-conversation",
             "cluster_id": "c-1",
             "conversation_id": conversation_id,
@@ -257,6 +262,7 @@ def test_rca_analyze_v1_http(client: TestClient):
     res = client.post(
         "/api/v1/rca/analyze",
         json={
+            "skip_hitl": True,
             "job_run_id": "jr-1",
             "job_id": "j-1",
             "evidence_pack": {
@@ -346,3 +352,97 @@ def test_hitl_session_pause_get_resume(client: TestClient):
         json={"decision": "approved"},
     )
     assert again.status_code == 409
+
+
+_METRICS = {
+    "azure_worker_vm_size": "Standard_E8s_v3",
+    "max_worker_nodes_provisioned": 16,
+    "avg_worker_nodes_consumed": 4.0,
+    "p99_worker_nodes_consumed": 5.0,
+    "peak_worker_cpu_utilization_pct": 20,
+    "peak_worker_memory_utilization_pct": 25,
+    "avg_worker_cpu_utilization_pct": 15,
+    "avg_worker_memory_utilization_pct": 18,
+    "driver_node_count": 1,
+}
+
+
+def test_cluster_tuning_hitl_approve_modify(client: TestClient):
+    paused = client.post(
+        "/api/v1/cluster_tuning/recommend",
+        json={
+            "job_id": "j-hitl-tune",
+            "cluster_id": "c-1",
+            "include_explanation": False,
+            "metrics": _METRICS,
+        },
+    )
+    assert paused.status_code == 200, paused.text
+    body = paused.json()
+    assert body["status"] == "waiting_hitl"
+    assert body.get("session_id")
+    assert body.get("recommendation")
+    assert not body.get("recommendation_id")
+    sid = body["session_id"]
+
+    bad = client.post(
+        f"/api/v1/sessions/{sid}/resume",
+        json={"decision": "modified", "patch": {"not_allowed": 1}},
+    )
+    assert bad.status_code == 400
+
+    resumed = client.post(
+        f"/api/v1/sessions/{sid}/resume",
+        json={
+            "decision": "modified",
+            "comment": "lower workers",
+            "patch": {"recommended_max_workers": 3},
+        },
+    )
+    assert resumed.status_code == 200, resumed.text
+    out = resumed.json()
+    assert out["status"] == "closed"
+    assert out["state"]["recommendation"]["recommended_max_workers"] == 3
+    assert out["state"].get("recommendation_id")
+
+
+def test_spark_rca_hitl_approve_only(client: TestClient):
+    paused = client.post(
+        "/api/v1/rca/analyze",
+        json={
+            "job_run_id": "jr-hitl-1",
+            "job_id": "j-hitl-rca",
+            "evidence_pack": {
+                "job_run_id": "jr-hitl-1",
+                "evidence": [
+                    {"ref": "e1", "excerpt": "Executor OutOfMemoryError: Java heap space"}
+                ],
+                "raw_anchors": {
+                    "failure_reason": "Executor OutOfMemoryError: Java heap space"
+                },
+            },
+        },
+    )
+    assert paused.status_code == 200, paused.text
+    body = paused.json()
+    assert body["status"] == "waiting_hitl"
+    assert body.get("session_id")
+    assert body.get("root_cause")
+    assert not body.get("recommendation_id")
+    sid = body["session_id"]
+
+    denied = client.post(
+        f"/api/v1/sessions/{sid}/resume",
+        json={"decision": "modified", "patch": {"root_cause": {}}},
+    )
+    assert denied.status_code == 400
+
+    resumed = client.post(
+        f"/api/v1/sessions/{sid}/resume",
+        json={"decision": "approved", "comment": "looks good"},
+    )
+    assert resumed.status_code == 200, resumed.text
+    out = resumed.json()
+    assert out["status"] == "closed"
+    assert out["state"].get("hitl_outcome") == "approved"
+    assert out["state"].get("recommendation_id")
