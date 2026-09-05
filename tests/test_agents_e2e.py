@@ -11,7 +11,7 @@ from edim_dde_ai.errors import ConversationMemoryDisabledError
 from edim_dde_domain import bootstrap_agents, reset_bootstrap
 from edim_dde_domain.sources import clear_sources
 from edim_dde_domain.testing import DomainStubLLM
-from edim_dde_api.routes import _conversation_payload
+from edim_dde_ai.session.host import normalize_conversation_payload
 from edim_dde_api.schemas import TuningRequest
 from fastapi.testclient import TestClient
 
@@ -109,7 +109,7 @@ def test_disabled_memory_rejects_conversation_id():
     )
 
     with pytest.raises(ConversationMemoryDisabledError) as exc_info:
-        _conversation_payload(
+        normalize_conversation_payload(
             body,
             request_id="r-disabled",
             memory_enabled=False,
@@ -138,7 +138,7 @@ def test_disabled_memory_treats_message_as_standalone():
         message="Explain this recommendation.",
     )
 
-    payload, conversation_id = _conversation_payload(
+    payload, conversation_id = normalize_conversation_payload(
         body,
         request_id="r-standalone",
         memory_enabled=False,

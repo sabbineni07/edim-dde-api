@@ -388,9 +388,11 @@ class RecommendationHistoryItem(BaseModel):
 
     Attributes:
         recommendation_id: Stable lifecycle record id.
-        agent_id: Owning agent (``spark_rca`` or ``cluster_tuning``).
+        agent_id: Owning agent id.
         status: Current lifecycle status.
-        job_id / cluster_id / job_run_id: Optional identity filters / display.
+        subjects: Opaque entity keys from the store record.
+        job_id / cluster_id / job_run_id: Convenience projections from
+            ``subjects`` for Spark product UIs (optional).
         request_id: Correlation id from the original analyze/recommend call.
         env: Deployment env tag (from ``EDIM_ENV`` at persist time).
         created_at / updated_at: ISO timestamps when the store provides them.
@@ -399,8 +401,9 @@ class RecommendationHistoryItem(BaseModel):
     """
 
     recommendation_id: str
-    agent_id: str = "cluster_tuning"
+    agent_id: str
     status: str
+    subjects: dict[str, Any] = Field(default_factory=dict)
     job_id: Optional[str] = None
     cluster_id: Optional[str] = None
     job_run_id: Optional[str] = None

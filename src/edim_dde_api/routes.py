@@ -27,19 +27,30 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from edim_dde_ai import create_agent, get_agent_definition, list_agents
-from edim_dde_ai.errors import ConversationMemoryDisabledError, HitlError
-from edim_dde_ai.session import get_memory_policy, resolve_checkpointer_name
+from edim_dde_ai import create_agent, list_agents
+from edim_dde_ai.errors import HitlError
+from edim_dde_ai.session import resolve_checkpointer_name
+from edim_dde_ai.session.host import (
+    attach_thread_id,
+    memory_enabled_for_agent,
+    normalize_conversation_payload,
+    project_session_record,
+    project_session_state,
+)
 from edim_dde_ai.hitl import (
     STATUS_WAITING,
     is_hitl_waiting,
+    persist_after_hitl_if_needed,
+    register_hitl_persist_adapter,
     resume_hitl_session,
     should_persist_after_hitl,
 )
 from edim_dde_ai.observability import build_run_config, get_observability_provider
 from edim_dde_ai.recommendations import (
     RecommendationRecord,
+    get_recommendation_for_agent,
     get_recommendation_store,
+    merge_outcome_extra,
     new_recommendation_id,
 )
 from edim_dde_ai.retrieval import get_retrieval_provider, provider_for_corpus
@@ -113,48 +124,6 @@ def _request_id(
         or (str(existing).strip() if existing else "")
         or ""
     ).strip() or str(uuid.uuid4())
-
-
-def _conversation_payload(
-    body: Any, *, request_id: str, memory_enabled: bool
-) -> tuple[dict[str, Any], str | None]:
-    """Normalize conversation input according to the agent memory policy."""
-    payload = body.model_dump()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    message = payload.pop("message", None)
-    payload["request_id"] = request_id
-    if message:
-        payload["user_message"] = message
-    if not memory_enabled:
-        if conversation_id:
-            raise ConversationMemoryDisabledError(
-                "Conversational memory is disabled for this agent; "
-                "configure memory.strategy or remove conversation_id"
-            )
-        payload.pop("conversation_id", None)
-        return payload, None
-    conversation_id = conversation_id or str(uuid.uuid4())
-    payload["conversation_id"] = conversation_id
-    payload["thread_id"] = conversation_id
-    return payload, conversation_id
-
-
-def _memory_enabled(agent_id: str) -> bool:
-    """Return whether the agent accepts conversational follow-ups."""
-    return get_memory_policy(get_agent_definition(agent_id)).enabled
-
-
-def _config_with_thread(
-    config: dict[str, Any] | None, conversation_id: str | None
-) -> dict[str, Any]:
-    """Attach LangGraph ``thread_id`` when a conversation key is present."""
-    if not conversation_id:
-        return dict(config or {})
-    merged = dict(config or {})
-    configurable = dict(merged.get("configurable") or {})
-    configurable.setdefault("thread_id", conversation_id)
-    merged["configurable"] = configurable
-    return merged
 
 
 def _http_from_exc(
@@ -252,13 +221,6 @@ def health() -> dict[str, Any]:
     }
 
 
-def _normalize_http_session_status(status: str) -> str:
-    """Map in-graph HITL status onto the HTTP session contract."""
-    if status in {"resumed", "closed"}:
-        return "closed"
-    return status
-
-
 def _session_response(
     *,
     agent_id: str,
@@ -267,34 +229,19 @@ def _session_response(
     status_override: str | None = None,
 ) -> SessionResponse:
     """Project flat agent / session state into ``SessionResponse``."""
-    status = status_override or str(state.get("hitl_status") or "completed")
-    status = _normalize_http_session_status(status)
     return SessionResponse(
-        session_id=state.get("session_id"),
-        agent_id=agent_id,
-        status=status,
-        hitl_prompt=state.get("hitl_prompt"),
-        hitl_gate_id=state.get("hitl_gate_id"),
-        hitl_decision=state.get("hitl_decision"),
-        request_id=request_id or state.get("request_id"),
-        state=state,
+        **project_session_state(
+            agent_id=agent_id,
+            state=state,
+            request_id=request_id,
+            status_override=status_override,
+        )
     )
 
 
 def _session_response_from_record(rec: SessionRecord) -> SessionResponse:
     """Project a persisted ``SessionRecord`` into ``SessionResponse``."""
-    state = dict(rec.state or {})
-    extra = rec.extra or {}
-    return SessionResponse(
-        session_id=rec.session_id,
-        agent_id=rec.agent_id,
-        status=rec.status,
-        hitl_prompt=extra.get("prompt") or state.get("hitl_prompt"),
-        hitl_gate_id=extra.get("gate_id") or state.get("hitl_gate_id"),
-        hitl_decision=state.get("hitl_decision"),
-        request_id=rec.request_id,
-        state=state,
-    )
+    return SessionResponse(**project_session_record(rec))
 
 
 @api_v1.post("/sessions", response_model=SessionResponse)
@@ -398,48 +345,9 @@ async def resume_session(
     except HitlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Best-effort RecStore write after product HITL approval / modify.
-    if should_persist_after_hitl(final):
-        try:
-            if rec.agent_id == "cluster_tuning":
-                tuning = tuning_response_from_agent_state(final, request_id=rid)
-                tuning = _persist_tuning_recommendation(
-                    TuningRequest.model_validate(
-                        {
-                            "job_id": str(final.get("job_id") or "unknown"),
-                            "cluster_id": final.get("cluster_id"),
-                            "job_run_id": final.get("job_run_id"),
-                        }
-                    ),
-                    tuning,
-                    request_id=rid,
-                )
-                final = {
-                    **final,
-                    "recommendation_id": tuning.recommendation_id,
-                    "recommendation_status": tuning.recommendation_status,
-                }
-            elif rec.agent_id == "spark_rca":
-                rca = rca_response_from_agent_state(final)
-                rca = _persist_rca_recommendation(
-                    RcaRequest.model_validate(
-                        {
-                            "job_run_id": str(final.get("job_run_id") or "unknown"),
-                            "job_id": final.get("job_id"),
-                        }
-                    ),
-                    rca,
-                    request_id=rid,
-                )
-                final = {
-                    **final,
-                    "recommendation_id": rca.recommendation_id,
-                    "recommendation_status": rca.recommendation_status,
-                }
-        except Exception:  # noqa: BLE001 — persist is best-effort
-            logger.exception(
-                "HITL resume recommendation persist failed agent=%s", rec.agent_id
-            )
+    final = persist_after_hitl_if_needed(
+        rec.agent_id, final, request_id=rid, best_effort=True
+    )
 
     status = str(final.get("hitl_status") or "closed")
     return _session_response(
@@ -581,12 +489,12 @@ async def analyze_rca(
     request.state.request_id = rid
     try:
         agent = create_agent("spark_rca")
-        payload, conversation_id = _conversation_payload(
+        payload, conversation_id = normalize_conversation_payload(
             body,
             request_id=rid,
-            memory_enabled=_memory_enabled("spark_rca"),
+            memory_enabled=memory_enabled_for_agent("spark_rca"),
         )
-        config = _config_with_thread(
+        config = attach_thread_id(
             build_run_config(agent_id="spark_rca", request_id=rid),
             conversation_id,
         )
@@ -655,12 +563,12 @@ async def recommend_cluster(
     request.state.request_id = rid
     try:
         agent = create_agent("cluster_tuning")
-        payload, conversation_id = _conversation_payload(
+        payload, conversation_id = normalize_conversation_payload(
             body,
             request_id=rid,
-            memory_enabled=_memory_enabled("cluster_tuning"),
+            memory_enabled=memory_enabled_for_agent("cluster_tuning"),
         )
-        config = _config_with_thread(
+        config = attach_thread_id(
             build_run_config(agent_id="cluster_tuning", request_id=rid),
             conversation_id,
         )
@@ -794,8 +702,14 @@ def _persist_rca_recommendation(
             recommendation_id=rec_id,
             agent_id="spark_rca",
             status="proposed",
-            job_id=response.job_id or body.job_id,
-            job_run_id=response.job_run_id or body.job_run_id,
+            subjects={
+                k: v
+                for k, v in {
+                    "job_id": response.job_id or body.job_id,
+                    "job_run_id": response.job_run_id or body.job_run_id,
+                }.items()
+                if v is not None and str(v) != ""
+            },
             request_id=request_id,
             env=os.environ.get("EDIM_ENV"),
             request=body.model_dump(
@@ -889,9 +803,15 @@ def _persist_tuning_recommendation(
             recommendation_id=rec_id,
             agent_id="cluster_tuning",
             status="proposed",
-            job_id=response.job_id or body.job_id,
-            cluster_id=response.cluster_id or body.cluster_id,
-            job_run_id=response.job_run_id or body.job_run_id,
+            subjects={
+                k: v
+                for k, v in {
+                    "job_id": response.job_id or body.job_id,
+                    "cluster_id": response.cluster_id or body.cluster_id,
+                    "job_run_id": response.job_run_id or body.job_run_id,
+                }.items()
+                if v is not None and str(v) != ""
+            },
             request_id=request_id,
             env=os.environ.get("EDIM_ENV"),
             request=body.model_dump(
@@ -916,22 +836,62 @@ def _persist_tuning_recommendation(
         return response
 
 
+def _hitl_persist_tuning(state: dict[str, Any], request_id: str) -> dict[str, Any]:
+    """Product adapter: persist cluster_tuning after HITL approve/modify."""
+    tuning = tuning_response_from_agent_state(state, request_id=request_id)
+    tuning = _persist_tuning_recommendation(
+        TuningRequest.model_validate(
+            {
+                "job_id": str(state.get("job_id") or "unknown"),
+                "cluster_id": state.get("cluster_id"),
+                "job_run_id": state.get("job_run_id"),
+            }
+        ),
+        tuning,
+        request_id=request_id,
+    )
+    return {
+        **state,
+        "recommendation_id": tuning.recommendation_id,
+        "recommendation_status": tuning.recommendation_status,
+    }
+
+
+def _hitl_persist_rca(state: dict[str, Any], request_id: str) -> dict[str, Any]:
+    """Product adapter: persist spark_rca after HITL approve."""
+    rca = rca_response_from_agent_state(state)
+    rca = _persist_rca_recommendation(
+        RcaRequest.model_validate(
+            {
+                "job_run_id": str(state.get("job_run_id") or "unknown"),
+                "job_id": state.get("job_id"),
+            }
+        ),
+        rca,
+        request_id=request_id,
+    )
+    return {
+        **state,
+        "recommendation_id": rca.recommendation_id,
+        "recommendation_status": rca.recommendation_status,
+    }
+
+
+register_hitl_persist_adapter("cluster_tuning", _hitl_persist_tuning)
+register_hitl_persist_adapter("spark_rca", _hitl_persist_rca)
+
+
 def _history_item(record: RecommendationRecord) -> RecommendationHistoryItem:
-    """Map a store record to the public history item schema.
-
-    Args:
-        record: Persisted recommendation row from RecommendationStore.
-
-    Returns:
-        ``RecommendationHistoryItem`` for list/get/patch responses.
-    """
+    """Map a store record to the public history item schema."""
+    subjects = dict(record.subjects or {})
     return RecommendationHistoryItem(
         recommendation_id=record.recommendation_id,
         agent_id=record.agent_id,
         status=record.status,
-        job_id=record.job_id,
-        cluster_id=record.cluster_id,
-        job_run_id=record.job_run_id,
+        subjects=subjects,
+        job_id=subjects.get("job_id"),
+        cluster_id=subjects.get("cluster_id"),
+        job_run_id=subjects.get("job_run_id"),
         request_id=record.request_id,
         env=record.env,
         created_at=record.created_at,
@@ -946,18 +906,11 @@ def _record_for_agent(
 ) -> RecommendationRecord:
     """Load a recommendation and enforce agent ownership.
 
-    Args:
-        recommendation_id: Lifecycle record id from the path.
-        agent_id: Expected owning agent (``spark_rca`` or ``cluster_tuning``).
-
-    Returns:
-        Matching ``RecommendationRecord``.
-
     Raises:
         HTTPException: ``404`` when missing or owned by a different agent.
     """
-    row = get_recommendation_store().get(recommendation_id)
-    if row is None or row.agent_id != agent_id:
+    row = get_recommendation_for_agent(recommendation_id, agent_id)
+    if row is None:
         raise HTTPException(status_code=404, detail="recommendation not found")
     return row
 
@@ -986,9 +939,9 @@ def list_rca_recommendations(
         History items for ``agent_id=spark_rca``.
     """
     rows = get_recommendation_store().list(
-        job_id=job_id,
         status=status,
         agent_id="spark_rca",
+        subjects={"job_id": job_id} if job_id else None,
         limit=limit,
     )
     return [_history_item(row) for row in rows]
@@ -1029,16 +982,23 @@ def _apply_status_and_outcome(
         and body.rerun_job_run_id is None
     ):
         return updated
-    from edim_dde_domain.evaluation.correlation import merge_outcome_extra
+    # Job-run measurement fields are product vocabulary; pass via opaque updates.
+    updates: dict[str, Any] = {}
+    if body.rerun_success is not None:
+        from datetime import datetime, timezone
 
-    merged_extra = merge_outcome_extra(
+        updates["rerun_success"] = bool(body.rerun_success)
+        updates["measured_at"] = datetime.now(timezone.utc).isoformat()
+        if body.rerun_job_run_id:
+            updates["rerun_job_run_id"] = str(body.rerun_job_run_id).strip()
+    elif body.rerun_job_run_id:
+        updates["rerun_job_run_id"] = str(body.rerun_job_run_id).strip()
+    updated.extra = merge_outcome_extra(
         updated.extra,
         human_label=body.human_label,
         labeled_by=body.labeled_by,
-        rerun_success=body.rerun_success,
-        rerun_job_run_id=body.rerun_job_run_id,
+        updates=updates or None,
     )
-    updated.extra = merged_extra
     return store.save(updated)
 
 
@@ -1100,11 +1060,15 @@ def list_tuning_recommendations(
         History items for ``agent_id=cluster_tuning``.
     """
     store = get_recommendation_store()
+    subjects = {
+        k: v
+        for k, v in {"job_id": job_id, "cluster_id": cluster_id}.items()
+        if v
+    }
     rows = store.list(
-        job_id=job_id,
-        cluster_id=cluster_id,
         status=status,
         agent_id="cluster_tuning",
+        subjects=subjects or None,
         limit=limit,
     )
     return [_history_item(r) for r in rows]
