@@ -16,6 +16,9 @@ Public API / endpoint groups
   - RCA — ``POST /rca/analyze``, recommendation list/get/patch
   - Cluster tuning — ``POST /cluster_tuning/recommend``, recommendation list/get/patch
   - HITL — ``POST /sessions``, ``GET /sessions/{id}``, ``POST /sessions/{id}/resume``
+  - Directory — ``GET /directory/health``, ``GET /directory/agents``,
+    ``GET /directory/agents/{agent_id}``, ``POST /directory/register`` (ADR-001)
+  - Agents — ``POST /agents/{agent_id}/invoke`` (ADR-001 Phase 3 generic receiver)
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from edim_dde_ai import create_agent, list_agents
-from edim_dde_ai.errors import HitlError
+from edim_dde_ai.errors import AgentRegistryError, HitlError
 from edim_dde_ai.session import resolve_checkpointer_name
 from edim_dde_ai.session.host import (
     attach_thread_id,
@@ -71,6 +74,12 @@ from edim_dde_domain.sources import (
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from edim_dde_api import __version__
+from edim_dde_api.directory import (
+    get_agent_binding,
+    list_agent_bindings,
+    register_agent_binding,
+    resolve_directory_env,
+)
 from edim_dde_api.guide import guide_diagnostics
 from edim_dde_api.request_context import (
     get_request_id,
@@ -79,6 +88,12 @@ from edim_dde_api.request_context import (
 )
 from edim_dde_api.safe_logging import log_exception_once, safe_exc_message
 from edim_dde_api.schemas import (
+    AgentBinding,
+    AgentBindingListResponse,
+    AgentInvokeRequest,
+    AgentInvokeResponse,
+    DirectoryHealthResponse,
+    DirectoryRegisterRequest,
     KnowledgeIngestRequest,
     KnowledgeIngestResponse,
     RcaRequest,
@@ -219,6 +234,131 @@ def health() -> dict[str, Any]:
         "retrieval": getattr(retrieval, "name", "unknown"),
         "web_search": getattr(web_search, "name", "unknown"),
     }
+
+
+@api_v1.get("/directory/health", response_model=DirectoryHealthResponse)
+def directory_health() -> DirectoryHealthResponse:
+    """Agent Directory readiness (ADR-001 Phase 2).
+
+    HTTP:
+        ``GET /api/v1/directory/health`` → ``200`` with env + binding count.
+    """
+    env = resolve_directory_env()
+    agents = list_agent_bindings(env=env)
+    return DirectoryHealthResponse(
+        status="ok",
+        env=env,
+        agent_count=len(agents),
+        source="in_process_registry",
+    )
+
+
+@api_v1.get("/directory/agents", response_model=AgentBindingListResponse)
+def directory_list_agents() -> AgentBindingListResponse:
+    """List logical agent bindings for this environment.
+
+    HTTP:
+        ``GET /api/v1/directory/agents`` → ``200`` with local (and overlay) bindings.
+    """
+    env = resolve_directory_env()
+    raw = list_agent_bindings(env=env)
+    return AgentBindingListResponse(
+        env=env,
+        agents=[AgentBinding.model_validate(item) for item in raw],
+    )
+
+
+@api_v1.get("/directory/agents/{agent_id}", response_model=AgentBinding)
+def directory_get_agent(agent_id: str) -> AgentBinding:
+    """Resolve one agent binding by logical id.
+
+    HTTP:
+        ``GET /api/v1/directory/agents/{agent_id}`` → ``200`` or ``404``.
+    """
+    binding = get_agent_binding(agent_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail=f"Unknown agent_id: {agent_id}")
+    return AgentBinding.model_validate(binding)
+
+
+@api_v1.post("/directory/register", response_model=AgentBinding)
+def directory_register(body: DirectoryRegisterRequest) -> AgentBinding:
+    """Runtime heartbeat / self-register (ADR-001 Phase 5 MVP — in-process store).
+
+    HTTP:
+        ``POST /api/v1/directory/register`` → ``200`` upserted binding.
+        Same contract is intended when directory is extracted to a separate service.
+    """
+    try:
+        stored = register_agent_binding(
+            {
+                "agent_id": body.agent_id,
+                "env": resolve_directory_env(),
+                "mode": body.mode,
+                "transport": body.transport,
+                "endpoint": body.endpoint,
+                "invoke_path": body.invoke_path,
+                "version": body.version,
+                "healthy": body.healthy,
+                "metadata": body.metadata,
+            }
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return AgentBinding.model_validate(stored)
+
+
+@api_v1.post("/agents/{agent_id}/invoke", response_model=AgentInvokeResponse)
+async def invoke_registered_agent(
+    agent_id: str,
+    body: AgentInvokeRequest,
+    request: Request,
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+) -> AgentInvokeResponse:
+    """Generic flat-state invoke receiver (ADR-001 Phase 3).
+
+    HTTP:
+        ``POST /api/v1/agents/{agent_id}/invoke`` with ``{"input": {...}}``.
+        Returns envelope ``{agent_id, request_id, status, state}``.
+        HITL pauses return ``status=waiting`` with ``session_id`` when present.
+    """
+    rid = _request_id(request, x_request_id)
+    request.state.request_id = rid
+    aid = (agent_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=400, detail="agent_id required")
+    if aid not in set(list_agents()):
+        raise HTTPException(status_code=404, detail=f"Unknown agent_id: {aid}")
+
+    payload = dict(body.input or {})
+    payload.setdefault("request_id", rid)
+    config = build_run_config(agent_id=aid, request_id=rid)
+
+    try:
+        final = await _invoke_agent_in_thread(
+            request,
+            lambda: create_agent(aid).invoke(payload, config=config),
+            request_id=rid,
+        )
+    except AgentRegistryError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — map to safe 500
+        raise _http_from_exc(
+            status_code=500,
+            exc=exc,
+            where=f"agents/{aid}/invoke failed",
+        ) from exc
+
+    status = "waiting" if is_hitl_waiting(final) else "completed"
+    session_id = str(final.get("session_id") or "").strip() or None
+
+    return AgentInvokeResponse(
+        agent_id=aid,
+        request_id=rid,
+        status=status,
+        state=dict(final or {}),
+        session_id=session_id,
+    )
 
 
 def _session_response(

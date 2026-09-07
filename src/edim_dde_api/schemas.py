@@ -539,3 +539,72 @@ class SessionResponse(BaseModel):
     hitl_decision: Optional[str] = None
     request_id: Optional[str] = None
     state: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentBinding(BaseModel):
+    """One Agent Directory binding (ADR-001).
+
+    ``mode=local`` + ``transport=in_process`` → in-process subgraph.
+    ``mode=remote`` + ``transport=http`` → Phase 4 dialer.
+    """
+
+    agent_id: str
+    env: str
+    mode: str = Field(..., description="local | remote")
+    transport: str = Field(..., description="in_process | http | mcp | …")
+    endpoint: Optional[str] = None
+    invoke_path: Optional[str] = None
+    version: Optional[str] = None
+    healthy: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentBindingListResponse(BaseModel):
+    """GET ``/api/v1/directory/agents``."""
+
+    env: str
+    agents: list[AgentBinding] = Field(default_factory=list)
+
+
+class DirectoryHealthResponse(BaseModel):
+    """GET ``/api/v1/directory/health``."""
+
+    status: str = "ok"
+    env: str
+    agent_count: int
+    source: str = Field(
+        ...,
+        description="Where bindings come from (e.g. in_process_registry)",
+    )
+
+
+class DirectoryRegisterRequest(BaseModel):
+    """POST ``/api/v1/directory/register`` — runtime heartbeat (Phase 5)."""
+
+    agent_id: str
+    mode: str = Field(default="remote", description="local | remote")
+    transport: str = Field(default="http", description="http | mcp | …")
+    endpoint: Optional[str] = None
+    invoke_path: Optional[str] = None
+    version: Optional[str] = None
+    healthy: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentInvokeRequest(BaseModel):
+    """POST ``/api/v1/agents/{agent_id}/invoke`` — flat-state generic invoke."""
+
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentInvokeResponse(BaseModel):
+    """Generic agent invoke result (flat state envelope)."""
+
+    agent_id: str
+    request_id: str
+    status: str = Field(
+        ...,
+        description="completed | waiting (HITL) | error",
+    )
+    state: dict[str, Any] = Field(default_factory=dict)
+    session_id: Optional[str] = None
