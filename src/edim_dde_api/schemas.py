@@ -592,19 +592,41 @@ class DirectoryRegisterRequest(BaseModel):
 
 
 class AgentInvokeRequest(BaseModel):
-    """POST ``/api/v1/agents/{agent_id}/invoke`` — flat-state generic invoke."""
+    """POST ``/api/v1/agents/{agent_id}/invoke`` — ADR-002 call contract.
+
+    Attributes:
+        input: Flat state / message bag for the peer.
+        conversation_id: Multi-turn key; server mints one when omitted.
+        async_accept: When true, may return ``status=running`` + ``task_id``
+            without executing the graph (async stub).
+    """
 
     input: dict[str, Any] = Field(default_factory=dict)
+    conversation_id: Optional[str] = None
+    async_accept: bool = False
 
 
 class AgentInvokeResponse(BaseModel):
-    """Generic agent invoke result (flat state envelope)."""
+    """ADR-002 Agent1↔Agent2 invoke envelope."""
 
     agent_id: str
     request_id: str
     status: str = Field(
         ...,
-        description="completed | waiting (HITL) | error",
+        description="completed | input_needed | running | waiting | error",
     )
     state: dict[str, Any] = Field(default_factory=dict)
+    conversation_id: Optional[str] = None
+    task_id: Optional[str] = None
     session_id: Optional[str] = None
+
+
+class AgentTaskResponse(BaseModel):
+    """GET ``/api/v1/agents/tasks/{task_id}`` — async accept poll stub."""
+
+    task_id: str
+    agent_id: str
+    request_id: str
+    status: str
+    conversation_id: Optional[str] = None
+    payload: dict[str, Any] = Field(default_factory=dict)

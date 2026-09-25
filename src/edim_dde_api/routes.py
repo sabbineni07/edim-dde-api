@@ -71,9 +71,11 @@ from edim_dde_domain.sources import (
     reset_request_databricks_token,
     set_request_databricks_token,
 )
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from edim_dde_api import __version__
+from edim_dde_api.a2a_auth import require_a2a_token
+from edim_dde_api.a2a_tasks import accept_task, get_task
 from edim_dde_api.directory import (
     get_agent_binding,
     list_agent_bindings,
@@ -92,6 +94,7 @@ from edim_dde_api.schemas import (
     AgentBindingListResponse,
     AgentInvokeRequest,
     AgentInvokeResponse,
+    AgentTaskResponse,
     DirectoryHealthResponse,
     DirectoryRegisterRequest,
     KnowledgeIngestRequest,
@@ -282,7 +285,10 @@ def directory_get_agent(agent_id: str) -> AgentBinding:
 
 
 @api_v1.post("/directory/register", response_model=AgentBinding)
-def directory_register(body: DirectoryRegisterRequest) -> AgentBinding:
+def directory_register(
+    body: DirectoryRegisterRequest,
+    _: None = Depends(require_a2a_token),
+) -> AgentBinding:
     """Runtime heartbeat / self-register (ADR-001 Phase 5 MVP — in-process store).
 
     HTTP:
@@ -314,14 +320,19 @@ async def invoke_registered_agent(
     body: AgentInvokeRequest,
     request: Request,
     x_request_id: str | None = Header(default=None, alias="X-Request-Id"),
+    _: None = Depends(require_a2a_token),
 ) -> AgentInvokeResponse:
-    """Generic flat-state invoke receiver (ADR-001 Phase 3).
+    """Generic Agent1↔Agent2 invoke receiver (ADR-002 call contract).
 
     HTTP:
-        ``POST /api/v1/agents/{agent_id}/invoke`` with ``{"input": {...}}``.
-        Returns envelope ``{agent_id, request_id, status, state}``.
-        HITL pauses return ``status=waiting`` with ``session_id`` when present.
+        ``POST /api/v1/agents/{agent_id}/invoke`` with
+        ``{"input": {...}, "conversation_id"?: "...", "async_accept"?: false}``.
+        Returns envelope ``{agent_id, request_id, status, state, conversation_id, …}``.
+        Statuses: ``completed`` | ``input_needed`` | ``running`` | ``waiting``.
     """
+    from edim_dde_ai.a2a.envelope import build_call_envelope
+    from edim_dde_ai.session.host import attach_thread_id, memory_enabled_for_agent
+
     rid = _request_id(request, x_request_id)
     request.state.request_id = rid
     aid = (agent_id or "").strip()
@@ -332,7 +343,49 @@ async def invoke_registered_agent(
 
     payload = dict(body.input or {})
     payload.setdefault("request_id", rid)
+    cid = (
+        (body.conversation_id or "").strip()
+        or str(payload.get("conversation_id") or "").strip()
+        or str(payload.get("thread_id") or "").strip()
+        or str(uuid.uuid4())
+    )
+    payload["conversation_id"] = cid
+    # Keep thread_id in state for peers that read it; do not force checkpointer
+    # unless memory is enabled (ADR-002 opaque conversation_id).
+    if memory_enabled_for_agent(aid):
+        payload["thread_id"] = cid
+
+    if body.async_accept:
+        rec = accept_task(
+            agent_id=aid,
+            request_id=rid,
+            conversation_id=cid,
+            payload=payload,
+        )
+        stub_state = {
+            "conversation_id": cid,
+            "thread_id": cid,
+            "task_id": rec["task_id"],
+            "a2a_status": "running",
+            "message": "accepted",
+        }
+        env = build_call_envelope(
+            agent_id=aid,
+            request_id=rid,
+            state=stub_state,
+            status="running",
+            conversation_id=cid,
+            task_id=rec["task_id"],
+        )
+        return AgentInvokeResponse(**env)
+
     config = build_run_config(agent_id=aid, request_id=rid)
+    # Mark A2A so opaque conversation_id is allowed without memory.strategy.
+    meta = dict(config.get("metadata") or {})
+    meta["edim_a2a"] = True
+    config["metadata"] = meta
+    if memory_enabled_for_agent(aid):
+        config = attach_thread_id(config, cid)
 
     try:
         final = await _invoke_agent_in_thread(
@@ -349,15 +402,37 @@ async def invoke_registered_agent(
             where=f"agents/{aid}/invoke failed",
         ) from exc
 
-    status = "waiting" if is_hitl_waiting(final) else "completed"
-    session_id = str(final.get("session_id") or "").strip() or None
-
-    return AgentInvokeResponse(
+    status = "waiting" if is_hitl_waiting(final) else None
+    env = build_call_envelope(
         agent_id=aid,
         request_id=rid,
-        status=status,
         state=dict(final or {}),
-        session_id=session_id,
+        status=status,
+        conversation_id=cid,
+    )
+    return AgentInvokeResponse(**env)
+
+
+@api_v1.get("/agents/tasks/{task_id}", response_model=AgentTaskResponse)
+def get_a2a_task(
+    task_id: str,
+    _: None = Depends(require_a2a_token),
+) -> AgentTaskResponse:
+    """Poll an async-accepted A2A task (ADR-002 ``running`` stub).
+
+    HTTP:
+        ``GET /api/v1/agents/tasks/{task_id}`` → ``200`` or ``404``.
+    """
+    rec = get_task(task_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Unknown task_id: {task_id}")
+    return AgentTaskResponse(
+        task_id=str(rec["task_id"]),
+        agent_id=str(rec["agent_id"]),
+        request_id=str(rec["request_id"]),
+        status=str(rec.get("status") or "running"),
+        conversation_id=rec.get("conversation_id"),
+        payload=dict(rec.get("payload") or {}),
     )
 
 

@@ -7,7 +7,7 @@
 .PHONY: help vendor-wheels vendor-wheels-win guide-site guide-site-win copy-guide-site bundle-guide-site-win apps-create apps-sync apps-sync-win apps-deploy apps-deploy-win apps-get apps-list \
 	docker-build docker-build-local docker-run docker-run-local compose-up compose-down compose-ps compose-logs \
 	pg-up pg-down pg-ps pg-wait host-run host-up \
-	e2e-health e2e-dry e2e-durable e2e-local clean-vendor
+	e2e-health e2e-dry e2e-durable e2e-local e2e-a2a-dial clean-vendor
 
 PYTHON ?= python3
 APP_NAME ?= edim-dde-api-dev
@@ -233,6 +233,9 @@ e2e-local: ## compose-up + e2e-dry (one-shot local container E2E)
 	$(MAKE) compose-up
 	$(MAKE) e2e-dry BASE="$(BASE)" EXPECT_STATE_STORE="$(EXPECT_STATE_STORE)" \
 		EXPECT_CHECKPOINTER="$(EXPECT_CHECKPOINTER)"
+
+e2e-a2a-dial: ## Two-runtime dial smoke (compose_parent → peer compose_leaf + A2A token)
+	PYTHONPATH=src:../edim-dde-ai/src:../edim-dde-domain/src $(PYTHON) deploy/scripts/a2a_dial_smoke.py
 
 clean-vendor: ## Remove vendored wheels
 	rm -rf deploy/databricks-app/vendor
