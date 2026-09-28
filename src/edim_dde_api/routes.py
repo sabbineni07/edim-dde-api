@@ -75,7 +75,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from edim_dde_api import __version__
 from edim_dde_api.a2a_auth import require_a2a_token
-from edim_dde_api.a2a_tasks import accept_task, get_task
+from edim_dde_api.a2a_tasks import accept_task, get_task, schedule_agent_task
 from edim_dde_api.directory import (
     get_agent_binding,
     list_agent_bindings,
@@ -362,6 +362,10 @@ async def invoke_registered_agent(
             conversation_id=cid,
             payload=payload,
         )
+        schedule_agent_task(
+            rec["task_id"],
+            databricks_token=extract_forwarded_databricks_token(request.headers),
+        )
         stub_state = {
             "conversation_id": cid,
             "thread_id": cid,
@@ -418,10 +422,12 @@ def get_a2a_task(
     task_id: str,
     _: None = Depends(require_a2a_token),
 ) -> AgentTaskResponse:
-    """Poll an async-accepted A2A task (ADR-002 ``running`` stub).
+    """Poll an async A2A task until completed / input_needed / error.
 
     HTTP:
         ``GET /api/v1/agents/tasks/{task_id}`` → ``200`` or ``404``.
+        While the in-process worker runs, ``status=running``; then
+        ``completed`` (with ``state``), ``input_needed``, or ``error``.
     """
     rec = get_task(task_id)
     if rec is None:
@@ -433,6 +439,9 @@ def get_a2a_task(
         status=str(rec.get("status") or "running"),
         conversation_id=rec.get("conversation_id"),
         payload=dict(rec.get("payload") or {}),
+        state=dict(rec.get("state") or {}),
+        error=rec.get("error"),
+        session_id=rec.get("session_id"),
     )
 
 

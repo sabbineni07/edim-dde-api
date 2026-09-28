@@ -597,8 +597,8 @@ class AgentInvokeRequest(BaseModel):
     Attributes:
         input: Flat state / message bag for the peer.
         conversation_id: Multi-turn key; server mints one when omitted.
-        async_accept: When true, may return ``status=running`` + ``task_id``
-            without executing the graph (async stub).
+        async_accept: When true, return ``status=running`` + ``task_id`` and
+            execute on the in-process A2A worker; poll ``GET …/tasks/{id}``.
     """
 
     input: dict[str, Any] = Field(default_factory=dict)
@@ -622,11 +622,23 @@ class AgentInvokeResponse(BaseModel):
 
 
 class AgentTaskResponse(BaseModel):
-    """GET ``/api/v1/agents/tasks/{task_id}`` — async accept poll stub."""
+    """GET ``/api/v1/agents/tasks/{task_id}`` — async task poll."""
 
     task_id: str
     agent_id: str
     request_id: str
-    status: str
+    status: str = Field(
+        ...,
+        description="running | completed | input_needed | error",
+    )
     conversation_id: Optional[str] = None
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Original invoke input bag",
+    )
+    state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Agent result state when completed / input_needed",
+    )
+    error: Optional[str] = None
+    session_id: Optional[str] = None

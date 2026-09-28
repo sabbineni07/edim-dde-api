@@ -131,7 +131,7 @@ def main() -> int:
         if (turn2.get("state") or {}).get("turn_count") != 2:
             raise RuntimeError(f"turn2 expected turn_count=2 got {turn2!r}")
 
-        # async_accept stub
+        # async_accept → worker → poll until completed
         accepted = _post_invoke(
             "a2a_partner",
             {
@@ -142,15 +142,24 @@ def main() -> int:
         )
         if accepted.get("status") != "running" or not accepted.get("task_id"):
             raise RuntimeError(f"async_accept failed: {accepted!r}")
-        task_req = urllib.request.Request(
-            f"{PEER_BASE}/api/v1/agents/tasks/{accepted['task_id']}",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-            method="GET",
-        )
-        with urllib.request.urlopen(task_req, timeout=5.0) as resp:  # noqa: S310
-            task_body = json.loads(resp.read().decode("utf-8"))
-        if task_body.get("status") != "running":
-            raise RuntimeError(f"task poll failed: {task_body!r}")
+        task_id = accepted["task_id"]
+        done = None
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            task_req = urllib.request.Request(
+                f"{PEER_BASE}/api/v1/agents/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                method="GET",
+            )
+            with urllib.request.urlopen(task_req, timeout=5.0) as resp:  # noqa: S310
+                done = json.loads(resp.read().decode("utf-8"))
+            if done.get("status") in {"completed", "input_needed", "error"}:
+                break
+            time.sleep(0.05)
+        if not done or done.get("status") != "completed":
+            raise RuntimeError(f"async worker did not complete: {done!r}")
+        if (done.get("state") or {}).get("reply") != "ack-later":
+            raise RuntimeError(f"async result unexpected: {done!r}")
 
         # --- call_agent from Runtime A with remote binding ---
         overlay = {
@@ -235,7 +244,8 @@ def main() -> int:
                     "peer": PEER_BASE,
                     "multi_turn": True,
                     "call_agent": True,
-                    "async_accept": accepted["task_id"],
+                    "async_accept": task_id,
+                    "async_result": (done.get("state") or {}).get("reply"),
                     "leaf_greeting": out.get("leaf_greeting"),
                     "auth": "EDIM_A2A_TOKEN enforced",
                 }

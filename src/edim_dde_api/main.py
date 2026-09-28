@@ -261,7 +261,26 @@ async def lifespan(_app: FastAPI):
             return get_foundry_llm_provider().invoke(messages, config=config)
 
     set_llm_provider(_LazyFoundry())
-    yield
+    try:
+        from edim_dde_api.a2a_tasks import configure_task_store_from_env
+
+        configure_task_store_from_env()
+    except Exception as exc:  # noqa: BLE001
+        log_exception_once(
+            log,
+            "A2A task store configure failed; continuing with memory",
+            exc,
+            level=logging.WARNING,
+        )
+    try:
+        yield
+    finally:
+        try:
+            from edim_dde_api.a2a_tasks import shutdown_a2a_workers
+
+            shutdown_a2a_workers(wait=False)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 app = FastAPI(

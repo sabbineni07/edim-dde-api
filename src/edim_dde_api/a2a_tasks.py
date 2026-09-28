@@ -1,53 +1,40 @@
-"""In-memory A2A task accept stub (ADR-002 ``running`` status).
+"""A2A async task helpers — re-export store + schedule worker.
 
-When ``async_accept`` is true on generic invoke, the API may return
-``status=running`` with a ``task_id`` without blocking on a worker. This
-module stores the accepted payload for later poll (GET stub optional).
+Business purpose
+----------------
+API routes accept async invokes and poll task status. Persistence lives in
+``edim_dde_ai.a2a.tasks``; execution is ``a2a_worker`` (in-process pool).
 """
 
 from __future__ import annotations
 
-import threading
-import uuid
-from typing import Any
+from edim_dde_ai.a2a.tasks import (
+    STATUS_COMPLETED,
+    STATUS_ERROR,
+    STATUS_INPUT_NEEDED,
+    STATUS_RUNNING,
+    accept_task,
+    clear_a2a_tasks,
+    configure_task_store_from_env,
+    get_task,
+    get_task_store,
+    set_task_store,
+    update_task,
+)
+from edim_dde_api.a2a_worker import schedule_agent_task, shutdown_a2a_workers
 
-_LOCK = threading.Lock()
-_TASKS: dict[str, dict[str, Any]] = {}
-
-
-def clear_a2a_tasks() -> None:
-    """Drop all accepted tasks (tests)."""
-    with _LOCK:
-        _TASKS.clear()
-
-
-def accept_task(
-    *,
-    agent_id: str,
-    request_id: str,
-    conversation_id: str | None,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    """Record an accepted async task; return task metadata."""
-    task_id = str(uuid.uuid4())
-    rec = {
-        "task_id": task_id,
-        "agent_id": agent_id,
-        "request_id": request_id,
-        "conversation_id": conversation_id,
-        "status": "running",
-        "payload": dict(payload),
-    }
-    with _LOCK:
-        _TASKS[task_id] = rec
-    return rec
-
-
-def get_task(task_id: str) -> dict[str, Any] | None:
-    """Return a stored task or ``None``."""
-    tid = (task_id or "").strip()
-    if not tid:
-        return None
-    with _LOCK:
-        rec = _TASKS.get(tid)
-        return dict(rec) if rec else None
+__all__ = [
+    "STATUS_COMPLETED",
+    "STATUS_ERROR",
+    "STATUS_INPUT_NEEDED",
+    "STATUS_RUNNING",
+    "accept_task",
+    "clear_a2a_tasks",
+    "configure_task_store_from_env",
+    "get_task",
+    "get_task_store",
+    "schedule_agent_task",
+    "set_task_store",
+    "shutdown_a2a_workers",
+    "update_task",
+]
